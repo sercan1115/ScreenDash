@@ -63,11 +63,16 @@ jobs:
           dotnet run --project ScreenDash.RecorderTests/ScreenDash.RecorderTests.csproj --configuration Release -- --process-checks
           if ($LASTEXITCODE -ne 0) { throw 'Recorder process tests failed.' }
 
+      - name: Test controller scheduling without capture
+        run: |
+          dotnet run --project ScreenDash.ControllerCheck/ScreenDash.ControllerCheck.csproj --configuration Release -- --scheduling-checks
+          if ($LASTEXITCODE -ne 0) { throw 'Controller scheduling tests failed.' }
+
       - name: Publish portable Windows x64 application
         run: |
           dotnet publish ScreenDash/ScreenDash.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:DebugSymbols=false --output dist
           if ($LASTEXITCODE -ne 0) { throw 'Application publish failed.' }
-          Copy-Item -LiteralPath README.de.md, NEU-IN-1.2.de.md, TESTBERICHT.de.md, Drittanbieter-Lizenzen.txt -Destination dist
+          Copy-Item -LiteralPath README.de.md, NEU-IN-1.3.de.md, TESTBERICHT.de.md, Drittanbieter-Lizenzen.txt -Destination dist
           if (Test-Path -LiteralPath LICENSE) { Copy-Item -LiteralPath LICENSE -Destination dist }
 
       - name: Upload portable application

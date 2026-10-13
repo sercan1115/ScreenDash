@@ -1,9 +1,12 @@
 using System.Text.Json;
 using ScreenDash;
 
+if (args.Length > 0 && args[0] == "--scheduling-checks") return await SchedulingChecks.RunAsync();
+
 string directory = Path.GetFullPath(args.Length > 0 ? args[0] : "work/controller-integration");
 Directory.CreateDirectory(directory);
-var settings = new AppSettings { RecordingDirectory = directory, ShowNotifications = false };
+bool timerTest = args.Length > 1 && args[1] == "timer";
+var settings = new AppSettings { RecordingDirectory = directory, ShowNotifications = false, AutoStopMinutes = timerTest ? 1 : 0 };
 using var controller = new AppController(settings);
 var checks = new List<string>();
 void Check(bool condition, string description)
@@ -36,10 +39,24 @@ try
     string export = Path.Combine(directory, "pause-export.mp4");
     await controller.ExportAsync(first.Path, export);
     Check(new FileInfo(export).Length > 0, "Closed segment exports as MP4 while paused");
+    var details = await controller.GetMediaDetailsAsync(first.Path);
+    Check(details.Duration > TimeSpan.Zero && details.HasAudio && details.Width > 0, "Completed recording exposes duration, dimensions and audio");
+    string clip = Path.Combine(directory, "short-clip.mp4");
+    await controller.ExportClipAsync(first.Path, clip, new ClipRange(TimeSpan.Zero, TimeSpan.FromSeconds(Math.Min(1, details.Duration.TotalSeconds))));
+    Check(new FileInfo(clip).Length > 0 && File.Exists(first.Path), "Clip export keeps the original recording");
+    try { await controller.ExportClipAsync(first.Path, Path.Combine(directory, "invalid.mp4"), new ClipRange(details.Duration, TimeSpan.FromSeconds(1))); throw new Exception("Invalid clip must be rejected."); }
+    catch (ArgumentOutOfRangeException) { Check(!File.Exists(Path.Combine(directory, "invalid.mp4")), "Out-of-range clips create no output"); }
     await controller.ResumeAsync();
     Check(controller.Status.Recording && !controller.Status.Paused, "Resume starts a fresh recording session");
     Check(controller.Status.Elapsed >= pausedElapsed, "Resume continues the session timer");
     await Task.Delay(2500);
+    if (timerTest)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(75);
+        while ((controller.Status.Armed || controller.Status.Recording || controller.Status.Busy) && DateTime.UtcNow < deadline) await Task.Delay(250);
+        Console.WriteLine($"Timer complete: armed={controller.Status.Armed}, recording={controller.Status.Recording}, busy={controller.Status.Busy}, message={controller.Status.Message}");
+        Check(!controller.Status.Armed && !controller.Status.Recording && controller.Status.Message.Contains("Zeitlimit"), "One-minute active recording timer stops the real encoder automatically");
+    }
     await controller.StopAsync();
     Check(!controller.Status.Recording && !controller.Status.Armed && !controller.Status.Paused, "Stop disarms the session");
     var clips = controller.GetRecordings();
@@ -52,3 +69,4 @@ try
     File.WriteAllText(Path.Combine(directory, "controller-result.json"), JsonSerializer.Serialize(new { success = true, checks }, new JsonSerializerOptions { WriteIndented = true }));
 }
 finally { await controller.StopAsync(); }
+return 0;

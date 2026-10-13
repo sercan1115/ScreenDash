@@ -11,5 +11,6 @@
     <Compile Include="../ScreenDash/RecordingSessionState.cs" Link="RecordingSessionState.cs" />
     <Compile Include="../ScreenDash/RecordingEstimates.cs" Link="RecordingEstimates.cs" />
     <Compile Include="../ScreenDash/RecordingClock.cs" Link="RecordingClock.cs" />
+    <Compile Include="../ScreenDash/RecordingTimer.cs" Link="RecordingTimer.cs" />
   </ItemGroup>
 </Project>

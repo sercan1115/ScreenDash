@@ -36,6 +36,8 @@ var tests = new (string Name, Action Run)[]
     ,("missing recordings cannot create orphan protection markers", MissingProtection)
     ,("hidden marker directories keep recordings protected", HiddenMarker)
     ,("large manual batch preserves notes until all targets validate", LargeManualBatch)
+    ,("canceled list preserves recordings and metadata", CanceledList)
+    ,("canceled list does not wait for another store operation", CanceledListWaitingForStore)
 };
 var failures = 0;
 foreach (var test in tests)
@@ -445,6 +447,80 @@ static void LargeManualBatch()
     store.SetProtected(marked, false);
     Check(store.Delete(paths, false) == paths.Length, "The entire validated batch should be deleted after the protection is removed.");
     Check(paths.All(p => !File.Exists(p) && !File.Exists(p + ".note.json")), "Successful batch deletion should remove each recording's owned note.");
+}
+
+static void CanceledList()
+{
+    using var temp = new Scratch();
+    var path = Segment(temp.Root, Now().AddHours(-1), Now());
+    var store = Store(temp.Root);
+    store.SetLabel(path, "Behalten 🚗");
+    store.SetProtected(path, true);
+    var note = File.ReadAllBytes(path + ".note.json");
+    var marker = File.ReadAllBytes(path + ".keep");
+    using var cancellation = new CancellationTokenSource();
+    cancellation.Cancel();
+    try
+    {
+        store.List(cancellationToken: cancellation.Token);
+        throw new InvalidOperationException("A canceled refresh must not return an archive snapshot.");
+    }
+    catch (OperationCanceledException error)
+    {
+        Check(error.CancellationToken == cancellation.Token, "Refresh must preserve the caller's cancellation token.");
+    }
+    Check(File.Exists(path) && File.ReadAllBytes(path + ".note.json").SequenceEqual(note)
+        && File.ReadAllBytes(path + ".keep").SequenceEqual(marker), "Canceling a read must leave videos and sidecars unchanged.");
+    var restored = store.List(cancellationToken: CancellationToken.None).Single();
+    Check(restored.Protected && restored.Label == "Behalten 🚗", "A later refresh must work normally after cancellation.");
+}
+
+static void CanceledListWaitingForStore()
+{
+    using var temp = new Scratch();
+    var path = Segment(temp.Root, Now().AddHours(-1), Now());
+    using var cleanupEntered = new ManualResetEventSlim();
+    using var releaseCleanup = new ManualResetEventSlim();
+    using var listCalled = new ManualResetEventSlim();
+    using var cancellation = new CancellationTokenSource();
+    var store = new RecordingStore(temp.Root, _ =>
+    {
+        cleanupEntered.Set();
+        if (!releaseCleanup.Wait(TimeSpan.FromSeconds(15))) throw new TimeoutException("Isolated cleanup test was not released.");
+        return 200L * 1024 * 1024 * 1024;
+    });
+    var cleanup = Task.Run(() => store.Cleanup(Settings(temp.Root), nowUtc: Now()));
+    Task? pendingList = null;
+    try
+    {
+        Check(cleanupEntered.Wait(TimeSpan.FromSeconds(5)), "The scratch store operation must hold its directory lock.");
+        pendingList = Task.Run(() =>
+        {
+            listCalled.Set();
+            try
+            {
+                store.List(cancellationToken: cancellation.Token);
+                throw new InvalidOperationException("A canceled queued list must not complete successfully.");
+            }
+            catch (OperationCanceledException error)
+            {
+                Check(error.CancellationToken == cancellation.Token, "Queued refresh must preserve cancellation identity.");
+            }
+        });
+        Check(listCalled.Wait(TimeSpan.FromSeconds(5)), "The queued refresh task must start.");
+        cancellation.CancelAfter(100);
+        Check(pendingList.Wait(TimeSpan.FromSeconds(2)), "Cancellation must finish while cleanup still holds the lock.");
+        pendingList.GetAwaiter().GetResult();
+        Check(!releaseCleanup.IsSet && !cleanup.IsCompleted, "List cancellation must not depend on finishing cleanup.");
+    }
+    finally
+    {
+        releaseCleanup.Set();
+        cleanup.GetAwaiter().GetResult();
+        // Always drain test work before disposing its events or deleting the scratch directory.
+        try { pendingList?.GetAwaiter().GetResult(); } catch { }
+    }
+    Check(store.List().Single().Path == path && File.Exists(path), "Canceled lock acquisition must not strand the lock or alter the recording.");
 }
 
 static void CleanupSidecars()

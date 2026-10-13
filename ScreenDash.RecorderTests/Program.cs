@@ -6,6 +6,9 @@ using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
 
 if (args.Length > 0 && args[0] == "--fake-ffmpeg") return await ProcessRegression.RunFakeAsync(args[1..]);
+if (Process.GetCurrentProcess().ProcessName.Equals("ffprobe", StringComparison.OrdinalIgnoreCase)
+    && Environment.GetEnvironmentVariable(ProcessRegression.FakeLogVariable) is not null)
+    return await ProcessRegression.RunFakeProbeAsync(args);
 if (Process.GetCurrentProcess().ProcessName.Equals("ffmpeg", StringComparison.OrdinalIgnoreCase)
     && Environment.GetEnvironmentVariable(ProcessRegression.FakeLogVariable) is not null)
     return await ProcessRegression.RunFakeExportAsync(args);

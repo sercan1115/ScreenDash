@@ -2,13 +2,17 @@
 
 Eine lokale Bildschirm-Dashcam für **Windows 10/11 (64 Bit)**. ScreenDash zeichnet einen ausgewählten Monitor mit Systemton auf, speichert eine durchgehende Datei je Aufnahme und räumt alte Aufnahmen automatisch auf.
 
-**[Windows-Version herunterladen](https://github.com/sercan1115/ScreenDash/releases/latest)** · [Anleitung](README.de.md) · [Neuerungen in 1.2](NEU-IN-1.2.de.md)
+**[Windows-Version herunterladen](https://github.com/sercan1115/ScreenDash/releases/latest)** · [Anleitung](README.de.md) · [Neuerungen in 1.3](NEU-IN-1.3.de.md)
 
 ![ScreenDash – Aufnahmeübersicht mit Beispieldaten](docs/screenshots/dashboard.png)
 
 Die Bilder zeigen die Oberfläche mit Beispieldaten. Ihre Auslastungsanzeigen sind keine Messwerte.
 
 ## Funktionen
+
+- **Clip-Export:** beliebigen Ausschnitt oder die letzten 30 Sekunden, eine Minute oder fünf Minuten als MP4 kopieren. Schneller Schnitt ohne Neukodierung, an Schlüsselbildern orientiert.
+- **Aufnahme-Timer:** optional nach einer gewünschten aktiven Aufnahmedauer stoppen; Pausen halten den Countdown an.
+- **Große Archive:** 200 Zeilen pro Seite, Filter über alle Aufnahmen, ohne Dateizugriffe beim Seitenwechsel.
 
 - **Eine Datei:** kein Wechsel nach einer Minute; optionale Segmentierung bleibt verfügbar. Pause oder Stoppen schließt die laufende Datei.
 - **Flüssiges Archiv:** Hintergrundladen, stabile Zeilen und Auswahl, echte Größen-/Zeitsortierung und neue Tastenkürzel.
@@ -24,6 +28,8 @@ Die Bilder zeigen die Oberfläche mit Beispieldaten. Ihre Auslastungsanzeigen si
 
 ![ScreenDash – Archiv mit Beispieldaten](docs/screenshots/archive.png)
 
+![ScreenDash – Clipwerkzeug mit Beispieldaten](docs/screenshots/clip.png)
+
 ## Starten
 
 1. Die Windows-ZIP aus den [Releases](https://github.com/sercan1115/ScreenDash/releases/latest) herunterladen und vollständig entpacken.
@@ -35,7 +41,7 @@ Die Bilder zeigen die Oberfläche mit Beispieldaten. Ihre Auslastungsanzeigen si
 
 3. `ScreenDash.exe` öffnen, Bildschirm, Tonausgabe und Aufnahmeordner wählen, Einstellungen speichern und die Aufnahme starten.
 
-Die portable App enthält die .NET-Laufzeit. FFmpeg ist separat erforderlich; ScreenDash findet `ffmpeg.exe` neben der App, unter `tools/ffmpeg.exe` oder im Windows-PATH. Die FFmpeg-Ausgabe muss `ddagrab` und einen passenden Hardware-Encoder unterstützen.
+Die portable App enthält die .NET-Laufzeit. FFmpeg ist separat erforderlich; ScreenDash findet `ffmpeg.exe` neben der App, unter `tools/ffmpeg.exe` oder im Windows-PATH. Die Clipprüfung benötigt außerdem `ffprobe.exe` aus derselben vollständigen Installation. Die FFmpeg-Ausgabe muss `ddagrab` und einen passenden Hardware-Encoder unterstützen.
 
 | Tastenkürzel | Aktion |
 | --- | --- |
@@ -61,7 +67,7 @@ cd ScreenDash
 .\build.ps1
 ```
 
-Das Skript führt 30 Speicher-/Einstellungstests, 22 Zustands-/Planungs-/Zeitprüfungen und 17 Prozess-/Exportprüfungen ohne Aufnahme aus und baut die portable App nach `dist`. GitHub Actions führt dieselben Tests auf Windows aus und erzeugt ein Build-Artefakt. Die geprüfte Windows-Version steht in den Releases.
+Das Skript führt 32 Speicher-/Einstellungstests, 25 Zustands-/Planungs-/Zeitprüfungen und 32 Prozess-/Medienprüfungen und 7 Controller-Ablaufprüfungen ohne Aufnahme aus und baut die portable App nach `dist`. GitHub Actions führt dieselben Tests auf Windows aus und erzeugt ein Build-Artefakt. Die geprüfte Windows-Version steht in den Releases.
 
 Zusätzliche Integrationstests benötigen einen interaktiven Windows-Desktop, einen Monitor, FFmpeg und gegebenenfalls ein Audiogerät. Sie zeichnen echte Bildschirminhalte auf und sind daher kein Bestandteil des CI-Laufs. Hinweise und Ergebnisse: [Testbericht](TESTBERICHT.de.md).
 

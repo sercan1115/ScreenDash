@@ -43,15 +43,32 @@ public sealed class RecordingStore
         }
     }
 
-    public IReadOnlyList<RecordingInfo> List(string? activeSessionPrefix = null)
+    public IReadOnlyList<RecordingInfo> List(string? activeSessionPrefix = null, CancellationToken cancellationToken = default)
     {
-        lock (_gate)
+        cancellationToken.ThrowIfCancellationRequested();
+        // A canceled refresh need not wait for a concurrent cleanup or another list scan.
+        // Mutation methods still use the same directory lock and their fresh safety checks.
+        if (cancellationToken.CanBeCanceled)
         {
-            EnsureSafeRoot();
-            var scan = Scan(activeSessionPrefix, loadLabels: true);
-            return scan.Entries.OrderByDescending(e => e.CompletedUtc).ThenByDescending(e => e.Path, StringComparer.Ordinal)
-                .Select(e => new RecordingInfo(e.Path, e.StartedUtc, e.Bytes, e.Protected, e.Active, e.Label)).ToArray();
+            while (!Monitor.TryEnter(_gate, 50)) cancellationToken.ThrowIfCancellationRequested();
         }
+        else Monitor.Enter(_gate);
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            EnsureSafeRoot();
+            var scan = Scan(activeSessionPrefix, loadLabels: true, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            var recordings = scan.Entries.OrderByDescending(e => e.CompletedUtc).ThenByDescending(e => e.Path, StringComparer.Ordinal)
+                .Select(e =>
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    return new RecordingInfo(e.Path, e.StartedUtc, e.Bytes, e.Protected, e.Active, e.Label);
+                }).ToArray();
+            cancellationToken.ThrowIfCancellationRequested();
+            return recordings;
+        }
+        finally { Monitor.Exit(_gate); }
     }
 
     public CleanupResult Cleanup(AppSettings settings, string? activeSessionPrefix = null, DateTime? nowUtc = null)
@@ -338,8 +355,9 @@ public sealed class RecordingStore
         }
     }
 
-    private ScanResult Scan(string? activePrefix, bool loadLabels = false)
+    private ScanResult Scan(string? activePrefix, bool loadLabels = false, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var entries = new List<Entry>();
         var hadErrors = false;
         var prefix = NormalizeActivePrefix(activePrefix);
@@ -354,6 +372,7 @@ public sealed class RecordingStore
             RecurseSubdirectories = false, AttributesToSkip = 0, IgnoreInaccessible = false
         }))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (info.Name.EndsWith(".keep", StringComparison.OrdinalIgnoreCase)) markers.Add(info.FullName);
             if (loadLabels && info.Name.EndsWith(".note.json", StringComparison.OrdinalIgnoreCase)) notes[info.FullName] = info;
             if (info is FileInfo file && TryParseName(info.Name, out var started, out var sessionPrefix))
@@ -362,12 +381,26 @@ public sealed class RecordingStore
         if (loadLabels)
         {
             // Entries for removed videos/notes must not accumulate across days of loop recording.
-            var videoNotes = videos.Select(v => v.Info.FullName + ".note.json").ToHashSet(StringComparer.OrdinalIgnoreCase);
-            foreach (var key in _notes.Keys.Where(k => !notes.ContainsKey(k) || !videoNotes.Contains(k)).ToArray()) _notes.Remove(key);
-            foreach (var key in _invalidNotes.Keys.Where(k => !notes.ContainsKey(k) || !videoNotes.Contains(k)).ToArray()) _invalidNotes.Remove(key);
+            var videoNotes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var video in videos)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                videoNotes.Add(video.Info.FullName + ".note.json");
+            }
+            foreach (var key in _notes.Keys.ToArray())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!notes.ContainsKey(key) || !videoNotes.Contains(key)) _notes.Remove(key);
+            }
+            foreach (var key in _invalidNotes.Keys.ToArray())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!notes.ContainsKey(key) || !videoNotes.Contains(key)) _invalidNotes.Remove(key);
+            }
         }
         foreach (var (info, started, sessionPrefix) in videos)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             try
             {
                 if (!info.Exists || (info.Attributes & (FileAttributes.ReparsePoint | FileAttributes.Directory)) != 0) continue;
@@ -379,7 +412,7 @@ public sealed class RecordingStore
                 var created = info.CreationTimeUtc;
                 var segmentStart = created >= started && created <= completion ? created : started;
                 entries.Add(new Entry(path, segmentStart, completion, lastWrite, created, info.Length, markers.Contains(path + ".keep"), false, sessionPrefix,
-                    loadLabels ? ReadLabel(path, notes.GetValueOrDefault(path + ".note.json")) : ""));
+                    loadLabels ? ReadLabel(path, notes.GetValueOrDefault(path + ".note.json"), cancellationToken) : ""));
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
@@ -389,6 +422,7 @@ public sealed class RecordingStore
         }
         if (prefix is not null)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var latest = entries.Where(e => StringComparer.Ordinal.Equals(e.SessionPrefix, prefix))
                 .OrderByDescending(e => e.Path, StringComparer.Ordinal).FirstOrDefault();
             if (latest is not null)
@@ -397,11 +431,13 @@ public sealed class RecordingStore
                 entries[index] = latest with { Active = true };
             }
         }
+        cancellationToken.ThrowIfCancellationRequested();
         return new(entries, hadErrors);
     }
 
-    private string ReadLabel(string videoPath, FileSystemInfo? noteInfo)
+    private string ReadLabel(string videoPath, FileSystemInfo? noteInfo, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var note = videoPath + ".note.json";
         var fingerprint = new NoteFingerprint(-1, DateTime.MinValue, DateTime.MinValue, default);
         try
@@ -416,12 +452,14 @@ public sealed class RecordingStore
             // Changes by another store/program invalidate the cached label through this snapshot.
             if (_notes.TryGetValue(note, out var cached) && cached.Fingerprint == fingerprint) return cached.Label;
             if (info.Length > MaximumNoteBytes) throw new JsonException("Die Beschriftungsdatei ist zu groß.");
+            cancellationToken.ThrowIfCancellationRequested();
             using var handle = OpenSafeFile(note, Native.GenericRead, Native.ShareRead);
             using var stream = new FileStream(handle, FileAccess.Read);
             var bytes = new byte[MaximumNoteBytes + 1];
             var length = 0;
             while (length < bytes.Length)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var read = stream.Read(bytes, length, bytes.Length - length);
                 if (read == 0) break;
                 length += read;
@@ -430,12 +468,14 @@ public sealed class RecordingStore
             var metadata = JsonSerializer.Deserialize<LabelNote>(bytes.AsSpan(0, length), NoteOptions)
                 ?? throw new JsonException("Die Beschriftungsdatei ist leer.");
             var label = ValidateLabel(metadata.Label);
+            cancellationToken.ThrowIfCancellationRequested();
             _invalidNotes.Remove(note);
             _notes[note] = new(fingerprint, label);
             return label;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or ArgumentException)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (!_invalidNotes.TryGetValue(note, out var previous) || previous != fingerprint)
             {
                 AppLog.Write("Beschriftung ignoriert: " + Path.GetFileName(note) + " – " + ex.Message);

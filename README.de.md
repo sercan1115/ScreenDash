@@ -1,6 +1,6 @@
-# ScreenDash 1.2
+# ScreenDash 1.3
 
-Die Neuerungen und Hinweise zum Update stehen in `NEU-IN-1.2.de.md`.
+Die Neuerungen und Hinweise zum Update stehen in `NEU-IN-1.3.de.md`.
 
 Eine lokale Bildschirm-Dashcam für Windows 10/11 (64 Bit). Sie nimmt **einen ausgewählten Monitor und den Ton eines Windows-Wiedergabegeräts** auf. Alle Videos bleiben auf deinem PC.
 
@@ -14,6 +14,10 @@ Eine lokale Bildschirm-Dashcam für Windows 10/11 (64 Bit). Sie nimmt **einen au
 FFmpeg muss separat installiert sein. Die App sucht `ffmpeg.exe` neben der EXE, unter `tools/ffmpeg.exe` und im Windows-PATH. Installiere eine aktuelle Windows-Ausgabe mit `ddagrab` und Hardware-Encodern, etwa über `winget install --id Gyan.FFmpeg -e`. Anschließend ScreenDash neu öffnen; bei Bedarf `ffmpeg.exe` neben die App legen. FFmpeg ist nicht in diesem Paket enthalten.
 
 ## Enthaltene Funktionen
+
+- **Clip-Werkzeug:** abgeschlossene Aufnahmen als Ausschnitt kopieren; Start und Länge wählen oder die letzten 30 Sekunden, eine Minute oder fünf Minuten verwenden. Bild und Ton werden ohne Neukodierung exportiert. Schlüsselbilder können den Schnitt etwas verschieben. FFprobe aus dem vollständigen FFmpeg-Paket ist dafür erforderlich.
+- **Aufnahme-Timer:** optional nach 1 bis 1440 aktiven Aufnahmeminuten stoppen. Pausen zählen nicht. Der sichtbare Countdown wird alle zwei Sekunden geprüft. Standardmäßig ausgeschaltet.
+- **Archivseiten:** 200 Dateien pro Seite; Suche und Filter finden auch Dateien auf anderen Seiten. Mehrfachauswahl gilt auf der sichtbaren Seite. Stopp/Pause warten nicht auf den eigentlichen Archivscan oder die laufende regelmäßige Speicherprüfung.
 
 - **Durchgehende Datei:** standardmäßig eine MKV pro ununterbrochener Aufnahme, ohne Wechsel nach einer Minute. Stoppen oder Pausieren schließt sie ab; Fortsetzen erzeugt eine neue Datei. Optional kann die bisherige Segmentierung eingeschaltet werden. Bei einem Absturz kann die letzte Datei unvollständig sein.
 - **Automatische Bereinigung:** abgeschlossene ungeschützte Aufnahmen werden sieben Tage nach ihrem letzten Schreiben gelöscht. Bei erreichtem Speicherlimit werden ältere Aufnahmen auch früher gelöscht. Zeitraum und Limit sind einstellbar; eine volle Woche ist bei kleinem Limit nicht garantiert.

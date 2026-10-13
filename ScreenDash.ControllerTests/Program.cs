@@ -216,6 +216,28 @@ var checks = new (string Name, Action Run)[]
         clock.Begin(); counter = 101_000; clock.End();
         Near(5.5, clock.Elapsed.TotalSeconds, 1e-9, "Resume must keep the previous duration.");
     }),
+    ("Timer is disabled by default and clears after stop", () =>
+    {
+        Require(RecordingTimer.Remaining(0, TimeSpan.FromHours(100), true) is null && !RecordingTimer.HasExpired(0, TimeSpan.FromHours(100)), "No timer means unlimited capture time.");
+        Require(RecordingTimer.Remaining(60, TimeSpan.FromMinutes(5), false) is null, "A stopped session has no countdown.");
+        Require(new AppSettings().AutoStopMinutes == 0, "Existing users must not unexpectedly receive a time limit.");
+    }),
+    ("Timer stops exactly at the active duration and does not count paused time", () =>
+    {
+        long counter = 0; var clock = new RecordingClock(() => counter, 1000);
+        clock.Begin(); counter = 30_000; clock.End(); counter = 900_000;
+        Require(RecordingTimer.Remaining(1, clock.Elapsed, true) == TimeSpan.FromSeconds(30), "Paused wall time must not consume the countdown.");
+        clock.Begin(); counter += 29_999;
+        Require(!RecordingTimer.HasExpired(1, clock.Elapsed), "A timer must not fire before its boundary.");
+        counter++;
+        Require(RecordingTimer.HasExpired(1, clock.Elapsed) && RecordingTimer.Remaining(1, clock.Elapsed, true) == TimeSpan.Zero, "The boundary must stop and show zero.");
+    }),
+    ("Timer clamps excessive limits and never shows a negative countdown", () =>
+    {
+        Require(RecordingTimer.Remaining(int.MaxValue, TimeSpan.Zero, true) == TimeSpan.FromDays(1), "Maximum is one day of active capture.");
+        Require(RecordingTimer.Remaining(1, TimeSpan.FromDays(30), true) == TimeSpan.Zero, "Expired countdown must stay at zero.");
+        Require(RecordingTimer.Remaining(1, TimeSpan.FromSeconds(-5), true) == TimeSpan.FromMinutes(1), "Invalid negative elapsed time must not extend the timer.");
+    }),
     ("Repeated clock events do not double count and reset starts fresh", () =>
     {
         long counter = 0;

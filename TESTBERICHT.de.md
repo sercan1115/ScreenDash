@@ -1,5 +1,17 @@
 # ScreenDash – Prüfergebnis
 
+## Version 1.3 – 14. Oktober 2026
+
+- 96 automatische Prüfungen ohne Aufnahme bestanden: 32 Speicher-/Einstellungstests, 25 Zustands-/Planungs-/Timerprüfungen, 32 Prozess-/Medienprüfungen und 7 Controller-Ablaufprüfungen.
+- Die Ablaufprüfungen blockieren einen isolierten Archivordner absichtlich: Stopp wartet nicht auf Archivlesen oder Hintergrundbereinigung. Abbruch beendet einen wartenden Lesescan. Eine simulierte Sperrmeldung setzt die Aufnahmeabsicht und das Startup-Abbruchsignal trotz belegter Steuerungssperre. Eine veraltete Pause beeinflusst keine neue Sitzung. Dabei werden keine Bildschirme oder Audiogeräte aufgenommen.
+- 52 UI-Prüfungen mit Beispieldaten bestanden: 1.201 Aufnahmen in Seiten mit höchstens 200 Zeilen, vollständige Suche/Filter, Auswahl und Seitengrenzen, keine Dateiscans beim Paging, Clipauswahl/-bereiche/-Presets, Countdown, Abbruch eines wartenden Exports und Stopp während eines wartenden Starts.
+- 22 reale Controllerprüfungen bestanden: Aufnahme mit Systemton, Schutz, Pause/Fortsetzen und eingefrorene Pausenzeit, Notizen, MP4, Metadaten, Clip, Ablehnung ungültiger Bereiche, Auto-Stopp nach einer Minute aktiver Aufnahmezeit und manuelles Löschen. Timerprüfung wartet auf vollständig geschlossene Datei und beendetem Encoder. Durch Pause entstehen zwei unabhängige durchgehende Dateien.
+- Medienexport mit vollständig künstlichem Bild/Ton getestet: 8,021 Sekunden H.264/AAC, Wunschbereich Beginn 2,375 Sekunden / Länge 2,25 Sekunden, MP4-Clip tatsächlich 2,666 Sekunden wegen Schlüsselbildausrichtung. Vollständige Dekodierung fehlerfrei, Original-Hash unverändert. Keine neue Kodierung im Clipwerkzeug.
+- Normale und kompakte Oberfläche sowie Clipdialog visuell geprüft. Alle sieben Archivwerkzeuge passen bei 1024 × 720. Alle Vorschaudaten und Auslastungswerte sind künstlich.
+- Aufnahme-/Encoderprofil weiterhin 15 FPS, etwa 3 Mbit/s und Hardware-Encoding. In dieser Version wurde kein neuer isolierter Spiele-/GPU-Benchmark durchgeführt. Medienmetadaten werden nur auf Anfrage gelesen; Archivseiten erzeugen keine zusätzlichen Dateiscans.
+
+Die automatisierten Ablauftests ersetzen keinen physischen Sperr-/Standby-Langzeittest. Bereits laufende Dateisystemzugriffe in der Startprüfung sind nicht sofort abbrechbar. Clipgrenzen sind schlüsselbildorientiert; exklusiver Spielton, alle Hardwaretypen und Dauerbetrieb über eine volle Woche wurden nicht neu physisch getestet. Reale Aufnahme-Testdateien bleiben im Arbeitsordner und werden nicht veröffentlicht.
+
 ## Version 1.2 – 14. Oktober 2026
 
 - 30/30 Speicher- und Einstellungstests bestanden, darunter Notizcache, externe Änderungen, gesperrte/entfernte Notizen, große Mehrfachauswahl und fehlende Schutz-Ziele.

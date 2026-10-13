@@ -92,6 +92,7 @@ public static class SettingsStore
         value.Fps = Math.Clamp(value.Fps, 5, 60);
         value.VideoBitrateKbps = Math.Clamp(value.VideoBitrateKbps, 500, 50_000);
         value.ProtectMinutes = Math.Clamp(value.ProtectMinutes, 1, 180);
+        value.AutoStopMinutes = Math.Clamp(value.AutoStopMinutes, 0, 1440);
         value.EncoderMode = value.EncoderMode?.Trim() ?? "Auto";
         if (value.EncoderMode is not ("Auto" or "NVIDIA" or "AMD" or "Intel" or "Software"))
             throw new ArgumentException("Bitte einen gültigen Encoder auswählen: Auto, NVIDIA, AMD, Intel oder Software.", nameof(settings));
