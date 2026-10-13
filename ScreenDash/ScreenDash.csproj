@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets/screendash.ico</ApplicationIcon>
+    <AssemblyName>ScreenDash</AssemblyName>
+    <Version>1.1.0</Version>
+    <Company>ScreenDash</Company>
+    <Description>Lokale Bildschirm-Dashcam für Windows</Description>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+  <ItemGroup><PackageReference Include="NAudio" Version="2.2.1" /></ItemGroup>
+</Project>

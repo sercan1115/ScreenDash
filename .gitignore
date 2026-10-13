@@ -1,0 +1,34 @@
+# Build products and local tools
+**/bin/
+**/obj/
+/dist/
+/work/
+/.vs/
+*.user
+*.suo
+
+# Local recordings, exports and settings
+*.mkv
+*.mp4
+*.wav
+*.pcm
+*.keep
+*.note.json
+*.log
+settings.json
+/smoke-test/
+/test-output/
+
+# Distribute binaries through GitHub Releases
+*.exe
+*.dll
+*.pdb
+*.zip
+
+# Secrets and editor-specific files
+.env
+.env.*
+*.pfx
+*.p12
+Thumbs.db
+Desktop.ini

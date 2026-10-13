@@ -1,0 +1,31 @@
+# ScreenDash – Prüfergebnis
+
+## Version 1.1
+
+- 24 von 24 Speicher-/Einstellungstests bestanden: zusätzlich Beschriftungen, Begrenzung beschädigter Metadaten, Mehrfachauswahl und Löschschutz für aktive/offene/geschützte Dateien.
+- 20 von 20 Tests für Aufnahmezustände und Speicherplanung bestanden: manuelle Pause bleibt beim Sperren und Standby erhalten, veraltete Neustartversuche verlieren ihre Gültigkeit, wiederholtes Fortsetzen ändert keine laufende Aufnahme, Schätzungen berücksichtigen Bitrate, Ton, geschützte Videos und Mindestreserve.
+- 18 Prüfungen mit echter Aufnahme bestanden: Aufnahme mit Systemton, Pause beendet den Encoder und schließt die Datei, während der Pause entstehen keine neuen Dateien, die Sitzungsdauer bleibt stehen, Fortsetzen nimmt in einer neuen Datei auf, Bezeichnung/Schutz/MP4-Export und ausgewähltes Löschen einschließlich eigener Begleitdatei funktionieren zusammen. Vorhandene Exporte bleiben erhalten.
+- Neue Oberfläche in normaler und kompakter Fenstergröße sowie alle vier Einstellungsbereiche mit Beispieldaten gerendert und visuell geprüft. Die Vorschau ist eine Darstellung mit Beispieldaten; ihre CPU-/Speicheranzeigen sind keine Messwerte.
+- 11 Prüfungen der Bedienoberfläche bestanden: Auswahl bleibt beim Aktualisieren erhalten, Suche findet Bezeichnungen, Suche/Filter verwenden den lokalen Zwischenspeicher, Schutz-/Zeitraumfilter funktionieren, Ultrasparprofil und individuelle Qualität bleiben erhalten, Pause/Fortsetzen zeigt die richtige Aktion.
+- Integrationstests verwendeten eigene Aufnahmeordner und änderten weder bestehende Einstellungen noch den Windows-Autostart.
+- Abschließender Test der veröffentlichten EXE erfolgreich: AMD AMF, 1080p, 15 FPS, H.264 mit Systemton und MP4-Export. Gemessene CPU für Testprozess plus Encoder über zwölf Sekunden etwa **0,8 %** der gesamten CPU-Kapazität, Arbeitsspeicher etwa **166 MiB**. Der Test lief ohne geöffnete neue Benutzeroberfläche; dies ist kein Benchmark für Spiele oder GPU-Last.
+
+## Grundlage: Version 1.0
+
+Erstellt und geprüft am 13. Oktober 2026 auf Windows mit AMD Radeon Graphics, zwei angeschlossenen 1920×1080-Monitoren und FFmpeg 8.1.2.
+
+- Build: erfolgreich, keine Fehler oder Warnungen.
+- Speicher- und Einstellungstests: 13 von 13 bestanden. Geprüft wurden unter anderem die Sieben-Tage-Frist, UTC-Grenze, geschützte und aktive Dateien, offene Dateien, Speicherlimit, freie Mindestreserve, fremde Dateien, Pfadgrenzen/Verknüpfungen und beschädigte Einstellungsdateien.
+- Reale Aufnahme: Hardware-Encoder AMD AMF, 1920×1080, 15 Bilder/s, etwa dreizehn Sekunden Videodatei mit H.264 und nicht stummer AAC-Systemtonspur.
+- Videozeitstempel: alle 198 Videopakete mit streng steigenden PTS/DTS.
+- MP4-Export: ohne Neukodierung erfolgreich; Videospur und Audiospur vorhanden. Unterschied der Spurendauer etwa 28 ms. Dies prüft die Kontinuität, nicht die exakte Synchronität von einzelnen sichtbaren und hörbaren Ereignissen.
+- CPU: etwa **0,9 % der gesamten CPU-Kapazität** im zwölf Sekunden langen Messfenster für Testprozess und FFmpeg gemeinsam. Arbeitsspeicher zusammen etwa **163 MiB**. Kein Spiel lief als kontrollierte Testlast. Diese Werte gelten für diese kurze Messung; sie messen keine GPU-Last und sind keine Garantie für andere Hardware oder Spieleleistung. Die normale Benutzeroberfläche benötigt zusätzlichen Speicher.
+- Oberfläche: drei Ansichten als Bilder gerendert und visuell geprüft; deutsche Bedienung, Einstellungen, Status und Aufnahmeliste.
+- Segmentwechsel/zweiter Monitor: reale Aufnahme des zweiten Monitors für über eine Minute, ohne Ton. Genau zwei unabhängige MKVs entstanden (etwa 60,2 und 6,1 Sekunden), beide 1920×1080, ohne Audiospur; alle 991 Videopakete mit streng steigenden PTS/DTS. Aufnahme sauber beendet.
+- Programminitialisierung mit echten Einstellungen und Geräteerkennung: erfolgreich; zwei Monitore erkannt, kein unbeabsichtigter Aufnahmestart.
+- Zusätzlicher Test der Encoder-Zeitbasis: Aufnahme des zweiten Monitors mit Ton und MP4-Export bestanden. Die Filter-Zeitbasis vermeidet Warnungen durch gerundete Encoder-Zeitstempel.
+- Absturztest: Testprogramm nach acht Sekunden absichtlich beendet. Windows beendete den zugehörigen Encoder automatisch; kein Encoder blieb zurück. Durch regelmäßiges Flushen blieb die teilweise geschriebene MKV mit 90 Videoframes abspielbar. Das garantiert keine vollständig erhaltene letzte Datei bei jedem denkbaren Absturz.
+
+NVIDIA- und Intel-Encoding werden mit derselben ausgewählten Bildschirmquelle beim Aufnahmestart geprüft; sie konnten auf diesem AMD-PC nicht physisch getestet werden. Autostart wurde im Test nicht aktiviert. Sperren/Standby und eine volle Woche Dauerbetrieb wurden nicht als Langzeittest ausgeführt.
+
+Die für echte Aufnahmetests verwendeten Bildschirmvideos bleiben im Arbeitsordner und sind nicht Teil des Auslieferungspakets.

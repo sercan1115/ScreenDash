@@ -1,0 +1,74 @@
+name: Windows build and tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+  DOTNET_NOLOGO: '1'
+
+jobs:
+  windows:
+    name: Test and package Windows x64
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install .NET 8 SDK
+        id: dotnet
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Select installed .NET 8 SDK
+        env:
+          SCREENDASH_SDK_VERSION: ${{ steps.dotnet.outputs.dotnet-version }}
+        run: |
+          # Hosted runners can also have newer SDKs. Keep this build on .NET 8.
+          $selection = @{ sdk = @{ version = $env:SCREENDASH_SDK_VERSION; rollForward = 'latestPatch'; allowPrerelease = $false } }
+          $selection | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath global.json -Encoding utf8NoBOM
+          dotnet --info
+          if ($LASTEXITCODE -ne 0) { throw '.NET SDK selection failed.' }
+
+      - name: Test recording store and settings
+        run: |
+          # This console test suite uses isolated NTFS temporary files; it records no screen or audio.
+          dotnet run --project ScreenDash.Tests/ScreenDash.Tests.csproj --configuration Release
+          if ($LASTEXITCODE -ne 0) { throw 'Recording store tests failed.' }
+
+      - name: Test session state and storage estimates
+        run: |
+          dotnet run --project ScreenDash.ControllerTests/ScreenDash.ControllerTests.csproj --configuration Release
+          if ($LASTEXITCODE -ne 0) { throw 'Controller tests failed.' }
+
+      - name: Publish portable Windows x64 application
+        run: |
+          dotnet publish ScreenDash/ScreenDash.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:DebugSymbols=false --output dist
+          if ($LASTEXITCODE -ne 0) { throw 'Application publish failed.' }
+          Copy-Item -LiteralPath README.de.md, NEU-IN-1.1.de.md, TESTBERICHT.de.md, Drittanbieter-Lizenzen.txt -Destination dist
+          if (Test-Path -LiteralPath LICENSE) { Copy-Item -LiteralPath LICENSE -Destination dist }
+
+      - name: Upload portable application
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ScreenDash-Windows-x64
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7

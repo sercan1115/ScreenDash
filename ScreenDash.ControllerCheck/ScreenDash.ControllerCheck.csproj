@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0-windows</TargetFramework><UseWindowsForms>true</UseWindowsForms><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="NAudio" Version="2.2.1" />
+    <Compile Include="../ScreenDash/Contracts.cs" Link="Contracts.cs" />
+    <Compile Include="../ScreenDash/AppController.cs" Link="AppController.cs" />
+    <Compile Include="../ScreenDash/RecordingSessionState.cs" Link="RecordingSessionState.cs" />
+    <Compile Include="../ScreenDash/RecordingEstimates.cs" Link="RecordingEstimates.cs" />
+    <Compile Include="../ScreenDash/RecordingStore.cs" Link="RecordingStore.cs" />
+    <Compile Include="../ScreenDash/SettingsStore.cs" Link="SettingsStore.cs" />
+    <Compile Include="../ScreenDash/AppLog.cs" Link="AppLog.cs" />
+    <Compile Include="../ScreenDash/Recorder.cs" Link="Recorder.cs" />
+    <Compile Include="../ScreenDash/AudioLoopback.cs" Link="AudioLoopback.cs" />
+    <Compile Include="../ScreenDash/DisplayCatalog.cs" Link="DisplayCatalog.cs" />
+    <Compile Include="../ScreenDash/ChildProcessGuard.cs" Link="ChildProcessGuard.cs" />
+  </ItemGroup>
+</Project>
