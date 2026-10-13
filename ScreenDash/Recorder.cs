@@ -50,7 +50,9 @@ public sealed class Recorder : IDisposable
         {
             try
             {
-                var candidate = Path.Combine(entry.Trim().Trim('"'), "ffmpeg.exe");
+                var directory = entry.Trim().Trim('"');
+                if (directory.Length == 0) continue;
+                var candidate = Path.Combine(directory, "ffmpeg.exe");
                 if (File.Exists(candidate)) return Path.GetFullPath(candidate);
             }
             catch (ArgumentException) { }
@@ -82,6 +84,9 @@ public sealed class Recorder : IDisposable
             Publish(new(false, "", "Hardware-Encoder wird mit dem ausgewählten Bildschirm geprüft …", 0, 0, null));
             var encoder = await SelectEncoderAsync(executable, options, display, startup.Token).ConfigureAwait(false);
             startup.Token.ThrowIfCancellationRequested();
+            // Probing can take several seconds. A hotplug may reuse an adapter/output index
+            // during that interval; never start recording a newly substituted desktop.
+            DisplayCatalog.ValidateSelection(display, DisplayCatalog.GetDisplays());
             SessionPrefix = sessionPrefix;
             _firstFrame = new(TaskCreationOptions.RunContinuationsAsynchronously);
             if (options.AudioEnabled)
@@ -99,7 +104,7 @@ public sealed class Recorder : IDisposable
             if (!process.Start()) throw new IOException("FFmpeg konnte nicht gestartet werden.");
             LowerPriority(process);
             _stderrTask = ReadErrorsAsync(process);
-            _progressTask = ReadProgressAsync(process, encoder.Name, startedUtc);
+            _progressTask = ReadProgressAsync(process, encoder.Name, startedUtc, _firstFrame);
             Publish(new(false, encoder.Name, "Aufnahme wird gestartet …", 0, 0, startedUtc));
             var exited = process.WaitForExitAsync(startup.Token);
             var deadline = Task.Delay(TimeSpan.FromSeconds(15), startup.Token);
@@ -179,7 +184,8 @@ public sealed class Recorder : IDisposable
             "-init_hw_device", $"d3d11va=desktop:{display.AdapterIndex}",
             "-filter_hw_device", "desktop", "-filter_complex_threads", "1", "-filter_threads", "1"
         };
-        if (!probe) args.AddRange(["-stats_period", "1", "-progress", "pipe:1"]);
+        if (probe) args.Add("-nostdin");
+        else args.AddRange(["-stats_period", "1", "-progress", "pipe:1"]);
         if (audio is not null)
         {
             args.AddRange(["-thread_queue_size", "64", "-probesize", "32", "-analyzeduration", "0",
@@ -202,6 +208,11 @@ public sealed class Recorder : IDisposable
             "-g", (s.Fps * 2).ToString(CultureInfo.InvariantCulture), "-bf", "0", "-enc_time_base:v", "filter",
             "-fps_mode", "passthrough"]);
         if (probe) args.AddRange(["-frames:v", "4", "-f", "null", "-"]);
+        else if (s.SingleFile)
+        {
+            args.AddRange(["-f", "matroska", "-cluster_time_limit", "2000", "-flush_packets", "1",
+                Path.Combine(s.RecordingDirectory, prefix + "_000000.mkv")]);
+        }
         else
         {
             args.AddRange(["-f", "segment", "-segment_time", (s.SegmentMinutes * 60).ToString(CultureInfo.InvariantCulture),
@@ -241,8 +252,7 @@ public sealed class Recorder : IDisposable
         }
         catch (OperationCanceledException)
         {
-            Kill(process);
-            await process.WaitForExitAsync().ConfigureAwait(false);
+            await TerminateAsync(process).ConfigureAwait(false);
             await Task.WhenAll(errors, output).ConfigureAwait(false);
             ct.ThrowIfCancellationRequested();
             return (false, "Hardware-Prüfung überschritt 6 Sekunden");
@@ -268,7 +278,7 @@ public sealed class Recorder : IDisposable
         catch (ObjectDisposedException) { }
     }
 
-    private async Task ReadProgressAsync(Process process, string encoder, DateTime startedUtc)
+    private async Task ReadProgressAsync(Process process, string encoder, DateTime startedUtc, TaskCompletionSource<bool> firstFrame)
     {
         long frames = 0;
         double fps = 0;
@@ -284,9 +294,11 @@ public sealed class Recorder : IDisposable
                 else if (key == "fps" && double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsedFps)) fps = parsedFps;
                 else if (key == "progress")
                 {
-                    if (frames > 0) _firstFrame?.TrySetResult(true);
                     if (ReferenceEquals(_process, process))
+                    {
+                        if (frames > 0) firstFrame.TrySetResult(true);
                         Publish(new(!_intentionalStop && frames > 0, encoder, _intentionalStop ? "Aufnahme wird beendet …" : "Aufnahme läuft", fps, frames, startedUtc));
+                    }
                 }
             }
         }
@@ -359,16 +371,18 @@ public sealed class Recorder : IDisposable
             {
                 if (!IsExited(process))
                 {
-                    await process.StandardInput.WriteLineAsync("q").ConfigureAwait(false);
-                    await process.StandardInput.FlushAsync().ConfigureAwait(false);
-                    await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(8)).ConfigureAwait(false);
+                    using var gracefulStop = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+                    // The deadline also covers stdin: a stuck encoder must not hold shutdown
+                    // indefinitely before we even reach WaitForExitAsync.
+                    await process.StandardInput.WriteLineAsync("q".AsMemory(), gracefulStop.Token).ConfigureAwait(false);
+                    await process.StandardInput.FlushAsync(gracefulStop.Token).ConfigureAwait(false);
+                    await process.WaitForExitAsync(gracefulStop.Token).ConfigureAwait(false);
                 }
             }
             catch { Kill(process); }
             if (!IsExited(process))
             {
-                Kill(process);
-                try { await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false); } catch { }
+                try { await TerminateAsync(process).ConfigureAwait(false); } catch (Exception ex) { WriteLog("Encoder shutdown: " + ex.Message); }
             }
         }
         var audio = _audio;
@@ -389,6 +403,7 @@ public sealed class Recorder : IDisposable
 
     public static async Task ExportAsync(string source, string destination, CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
         source = Path.GetFullPath(source);
         destination = Path.GetFullPath(destination);
         if (!File.Exists(source)) throw new FileNotFoundException("Die Aufnahme wurde nicht gefunden.", source);
@@ -409,14 +424,14 @@ public sealed class Recorder : IDisposable
             try { await process.WaitForExitAsync(ct).ConfigureAwait(false); }
             catch (OperationCanceledException)
             {
-                Kill(process);
-                await process.WaitForExitAsync().ConfigureAwait(false);
+                await TerminateAsync(process).ConfigureAwait(false);
                 await Task.WhenAll(errors, output).ConfigureAwait(false);
                 throw;
             }
             var error = await errors.ConfigureAwait(false);
             await output.ConfigureAwait(false);
             if (process.ExitCode != 0) throw new IOException("Export fehlgeschlagen: " + error);
+            ct.ThrowIfCancellationRequested();
             File.Move(temporary, destination);
         }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
@@ -453,6 +468,12 @@ public sealed class Recorder : IDisposable
     {
         try { if (!process.HasExited) process.Kill(true); } catch { }
     }
+    private static async Task TerminateAsync(Process process)
+    {
+        Kill(process);
+        try { await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false); }
+        catch (TimeoutException ex) { throw new IOException("FFmpeg lässt sich nicht beenden. Bitte das Aufnahmeprotokoll prüfen.", ex); }
+    }
     private static bool IsExited(Process? process)
     {
         if (process is null) return false;
@@ -460,6 +481,8 @@ public sealed class Recorder : IDisposable
     }
     private void Publish(RecorderStatus status)
     {
+        if (status.Recording && _audio is { } audio)
+            status = status with { AudioPeak = audio.PeakLevel, AudioDevice = audio.DeviceName };
         _status = status;
         try { Changed?.Invoke(status); } catch (Exception ex) { WriteLog("Status observer: " + ex.Message); }
     }

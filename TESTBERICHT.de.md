@@ -1,5 +1,18 @@
 # ScreenDash – Prüfergebnis
 
+## Version 1.2 – 14. Oktober 2026
+
+- 30/30 Speicher- und Einstellungstests bestanden, darunter Notizcache, externe Änderungen, gesperrte/entfernte Notizen, große Mehrfachauswahl und fehlende Schutz-Ziele.
+- 22/22 Zustands-, Planungs- und Zeitprüfungen bestanden. Die neue monotone Uhr zählt Pause/Fortsetzen und wiederholte Statusereignisse korrekt.
+- 17/17 Prozessprüfungen ohne Bildschirm-/Tonaufnahme bestanden: veränderte Bildschirmtopologie, begrenzte Fehlerpuffer, Probe-Abbruch, Export-Abbruch/Fehler/Erfolg, Schutz vorhandener Ziele und zeitlich begrenzter Stopp eines hängenden Encoders.
+- 20/20 UI-Prüfungen bestanden: Auswahl und Zeilenidentität beim Aktualisieren, numerische Größensortierung, Suche/Filter ohne erneute Dateizugriffe, Änderungen anzeigen, durchgehende Datei als Standard, Aufnahmebuttons während Export verfügbar, langsamer Scan lädt im Hintergrund und Filter bleiben bedienbar.
+- 18 reale Controllerprüfungen für Aufnahme, Schutz, Pause, Zeitmessung, Notizen, MP4-Export, Fortsetzen und manuelles Löschen bestanden.
+- Reale durchgehende Aufnahme mit Systemton auf dem zweiten 1080p-Monitor: genau eine MKV mit etwa 66,4 Sekunden, einschließlich der bisherigen Minutengrenze. H.264 über AMD AMF; Videozeitstempel streng steigend. Leiser Testton wurde über die echte Windows-Wiedergabe gespielt, WASAPI-Pegel war positiv und dekodierter AAC-Ton im MP4-Export war nicht stumm. Keine Aufnahmen werden mitgeliefert.
+- Über 64 Sekunden gemessene CPU für Testprozess plus Encoder etwa 2,4 % der gesamten CPU-Kapazität, Arbeitsspeicher etwa 189 MiB. Während dieses Integrationslaufs wurden auch Builds/UI-Prüfungen ausgeführt; dies ist kein isolierter Spiele- oder GPU-Benchmark. Die Probe umfasst Tonerzeugung im Testprozess. Die normale Oberfläche benötigt zusätzlichen Speicher.
+- Normale und kompakte Oberfläche mit Beispieldaten gerendert und visuell geprüft. Die in den Vorschauen gezeigten Auslastungswerte sind Beispieldaten.
+
+Automatisch in Build/CI: 69 Prüfungen ohne reale Aufnahme. UI- und Aufnahmeprüfungen sind separate lokale Tests. Konkrete Spiele, exklusive Audiogeräte, NVIDIA/Intel-Hardware und ein voller Wochenbetrieb sind nicht physisch auf dieser AMD-Maschine getestet.
+
 ## Version 1.1
 
 - 24 von 24 Speicher-/Einstellungstests bestanden: zusätzlich Beschriftungen, Begrenzung beschädigter Metadaten, Mehrfachauswahl und Löschschutz für aktive/offene/geschützte Dateien.

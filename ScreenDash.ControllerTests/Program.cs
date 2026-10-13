@@ -204,6 +204,28 @@ var checks = new (string Name, Action Run)[]
         Require(invalid.VideoBitrateKbps == 0 && invalid.RetentionDays == 0 && invalid.MaxStorageGb == 0,
             "Planning must not modify saved settings.");
         Reject<ArgumentNullException>(() => RecordingEstimates.Calculate(null!));
+    }),
+    ("Recording duration excludes pauses and continues across resume", () =>
+    {
+        long counter = 0;
+        var clock = new RecordingClock(() => counter, 1000);
+        clock.Begin(); counter = 3500;
+        Near(3.5, clock.Elapsed.TotalSeconds, 1e-9, "Recording must advance.");
+        clock.End(); counter = 99_000;
+        Near(3.5, clock.Elapsed.TotalSeconds, 1e-9, "A pause must not add time.");
+        clock.Begin(); counter = 101_000; clock.End();
+        Near(5.5, clock.Elapsed.TotalSeconds, 1e-9, "Resume must keep the previous duration.");
+    }),
+    ("Repeated clock events do not double count and reset starts fresh", () =>
+    {
+        long counter = 0;
+        var clock = new RecordingClock(() => counter, 1000);
+        clock.Begin(); counter = 500; clock.Begin(); counter = 1500;
+        clock.End(); clock.End();
+        Near(1.5, clock.Elapsed.TotalSeconds, 1e-9, "Repeated device/status events must be harmless.");
+        clock.Reset(); counter = 9999; clock.Begin(); counter += 250;
+        Near(0.25, clock.Elapsed.TotalSeconds, 1e-9, "A new session must start at zero.");
+        Reject<ArgumentOutOfRangeException>(() => new RecordingClock(() => 0, 0));
     })
 };
 

@@ -25,7 +25,16 @@ public sealed class MainForm : Form
     private readonly Label _footer = TextLabel("Alles bleibt auf deinem PC.  ·  Keine Cloud, kein Upload.", 9, Muted), _settingsHint = TextLabel("", 9, Muted), _qualityEstimate = TextLabel("", 10, Cyan), _quotaEstimate = TextLabel("", 10, Cyan);
     private readonly StorageMeter _storageMeter = new() { Dock = DockStyle.Fill };
     private readonly Button _toggle = ActionButton("●  Aufnahme starten", true), _pause = ActionButton("Ⅱ  Pause"), _protect = ActionButton("◇  Letzte 10 Min. sichern"), _save = ActionButton("Einstellungen speichern", true), _discard = ActionButton("Verwerfen"), _refreshDevices = ActionButton("Geräte aktualisieren");
-    private readonly Button _play = ActionButton("Abspielen"), _protectSelected = ActionButton("Sichern"), _releaseSelected = ActionButton("Freigeben"), _export = ActionButton("MP4 exportieren"), _labelSelected = ActionButton("Benennen"), _delete = ActionButton("Löschen");
+    private readonly Button _play = ActionButton("Abspielen"), _protectSelected = ActionButton("Sichern"), _releaseSelected = ActionButton("Freigeben"), _export = ActionButton("MP4 exportieren"), _labelSelected = ActionButton("Benennen"), _delete = ActionButton("Löschen"), _cancelExport = ActionButton("Abbrechen"), _clearFilters = ActionButton("Zurücksetzen");
+    private readonly ContextMenuStrip _archiveMenu = DarkMenu();
+    private readonly TableLayoutPanel _archiveProgressLayout = Grid(3, 1);
+    private readonly CancellationTokenSource _archiveReloadCancellation = new();
+    private int _dashboardUpdateQueued;
+    private readonly CheckBox _singleFile = Check("Eine durchgehende Datei pro Aufnahme (empfohlen)");
+    private readonly Label _sound = TextLabel("Tonprüfung: Aufnahme starten", 9, Muted);
+    private readonly Label _audioTestResult = TextLabel("Starte das Spiel und prüfe, ob Ton ankommt.", 9, Muted);
+    private CancellationTokenSource? _exportCancellation;
+    private Task? _activeExportTask;
     private readonly DataGridView _recordings = new();
     private readonly Label _recordingsSummary = TextLabel("", 10, Muted), _archiveProgress = TextLabel("Mehrere Abschnitte mit Strg oder Umschalt auswählen.", 9, Muted), _emptyArchive = TextLabel("Noch kein Rückblick vorhanden\n\nStarte eine Aufnahme. Deine Abschnitte erscheinen automatisch hier.", 12, Muted);
     private readonly ProgressBar _exportProgress = new() { Dock = DockStyle.Fill, Style = ProgressBarStyle.Marquee, MarqueeAnimationSpeed = 35, Visible = false };
@@ -34,7 +43,9 @@ public sealed class MainForm : Form
     private readonly CheckBox _audioEnabled = Check("Systemton aufnehmen"), _cursor = Check("Mauszeiger im Video anzeigen"), _software = Check("CPU-Kodierung als Ausweichlösung erlauben"), _pauseOnLock = Check("Bei gesperrtem Windows pausieren"), _recordOnLaunch = Check("Beim Programmstart direkt aufnehmen"), _startWithWindows = Check("ScreenDash mit Windows starten"), _notifications = Check("Hinweise im Windows-Infobereich anzeigen"), _minimizeOnRecord = Check("Nach dem Aufnahmestart in den Infobereich minimieren");
     private readonly NumericUpDown _segment = Number(1, 60), _retention = Number(1, 365), _maxStorage = Number(1, 4096), _minFree = Number(1, 128), _protectMinutes = Number(1, 180), _customFps = Number(5, 60), _customBitrate = Number(500, 50000);
     private readonly Panel _settingsFields = new() { Dock = DockStyle.Fill, Margin = Padding.Empty };
-    private bool _uiBusy, _exitRequested, _exitInProgress, _allowClose, _hiddenNoticeShown, _hotkeyToggle, _hotkeyProtect, _hotkeyPause, _loadingSettings, _updatingProfile, _exporting, _refreshingArchive, _wasRecording;
+    private bool _uiBusy, _exitRequested, _exitInProgress, _allowClose, _hiddenNoticeShown, _hotkeyToggle, _hotkeyProtect, _hotkeyPause, _loadingSettings, _updatingProfile, _exporting, _refreshingArchive, _wasRecording, _settingsDirty, _archiveLoading, _archiveReloadPending;
+    private string _settingsBaseline = "", _archiveLoadError = "", _archiveSortColumn = "Time";
+    private bool _archiveSortDescending = true;
     private long _lastRecordingsRefresh;
     private int _page;
     private IReadOnlyList<RecordingInfo> _archiveCache = Array.Empty<RecordingInfo>();
@@ -42,7 +53,7 @@ public sealed class MainForm : Form
     public MainForm(IAppController controller, bool startMinimized = false, bool enableHotkeys = true)
     {
         _controller = controller; _startMinimized = startMinimized; _enableHotkeys = enableHotkeys;
-        Text = "ScreenDash 1.1 · Bildschirm-Dashcam"; StartPosition = FormStartPosition.CenterScreen;
+        Text = "ScreenDash 1.2 · Bildschirm-Dashcam"; StartPosition = FormStartPosition.CenterScreen;
         ClientSize = new Size(1180, 780); MinimumSize = new Size(980, 660); AutoScaleMode = AutoScaleMode.Dpi;
         BackColor = Canvas; ForeColor = Ink; Font = new Font("Segoe UI", 10); DoubleBuffered = true;
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application; } catch { Icon = SystemIcons.Application; }
@@ -54,7 +65,7 @@ public sealed class MainForm : Form
         _trayMenu.Items.Add("Aufnahmeordner öffnen", null, (_, _) => RunSync(_controller.OpenRecordingFolder));
         _trayMenu.Items.Add("Beenden", null, async (_, _) => await ExitAsync());
         _tray = new NotifyIcon { Text = "ScreenDash · bereit", Icon = Icon, Visible = true, ContextMenuStrip = _trayMenu }; _tray.DoubleClick += (_, _) => ShowWindow();
-        BuildShell(); BuildDashboard(); BuildSettings(); BuildRecordings();
+        BuildShell(); BuildDashboard(); BuildSettings(); BuildRecordings(); TrackSettingsChanges();
         _content.Controls.AddRange([_dashboard, _settingsPage, _recordingsPage]); ShowPage(0); LoadSettings(); RefreshDashboard();
         _controller.Changed += ControllerChanged; _controller.Notice += ControllerNotice; FormClosing += HandleFormClosing;
         Resize += (_, _) => { if (WindowState == FormWindowState.Minimized) Hide(); };
@@ -76,7 +87,7 @@ public sealed class MainForm : Form
         var bottom = Grid(1, 4); bottom.RowStyles.Add(new RowStyle(SizeType.Absolute, 38)); bottom.RowStyles.Add(new RowStyle(SizeType.Absolute, 34)); bottom.RowStyles.Add(new RowStyle(SizeType.Absolute, 34)); bottom.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         var folder = ActionButton("Ordner öffnen  ↗"); folder.Dock = DockStyle.Fill; folder.Margin = new Padding(0, 0, 0, 5); folder.Font = new Font("Segoe UI", 9); folder.Click += (_, _) => RunSync(_controller.OpenRecordingFolder); bottom.Controls.Add(folder, 0, 0);
         var logs = ActionButton("Diagnose  ↗"); logs.Dock = DockStyle.Fill; logs.Margin = new Padding(0, 0, 0, 5); logs.Font = new Font("Segoe UI", 9); logs.Click += (_, _) => RunSync(_controller.OpenLogs); bottom.Controls.Add(logs, 0, 1);
-        bottom.Controls.Add(TextLabel("●  Lokal gespeichert", 9, Cyan), 0, 2); bottom.Controls.Add(TextLabel("Version 1.1  ·  Windows", 8, Muted), 0, 3); sidebarGrid.Controls.Add(bottom, 0, 3); shell.Controls.Add(sidebar, 0, 0);
+        bottom.Controls.Add(TextLabel("●  Lokal gespeichert", 9, Cyan), 0, 2); bottom.Controls.Add(TextLabel("Version 1.2  ·  Windows", 8, Muted), 0, 3); sidebarGrid.Controls.Add(bottom, 0, 3); shell.Controls.Add(sidebar, 0, 0);
         var main = Grid(1, 3); main.Padding = new Padding(28, 22, 28, 12); main.RowStyles.Add(new RowStyle(SizeType.Absolute, 83)); main.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); main.RowStyles.Add(new RowStyle(SizeType.Absolute, 29));
         var header = Grid(2, 2); header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 172)); header.RowStyles.Add(new RowStyle(SizeType.Absolute, 42)); header.RowStyles.Add(new RowStyle(SizeType.Absolute, 26));
         header.Controls.Add(_pageTitle, 0, 0); header.Controls.Add(_pageSubtitle, 0, 1); _headerState.TextAlign = ContentAlignment.MiddleRight; header.Controls.Add(_headerState, 1, 0); header.Controls.Add(TextLabel("Strg + Alt + F8 · Start / Stopp", 8, Muted), 1, 1);
@@ -85,21 +96,21 @@ public sealed class MainForm : Form
 
     private void BuildDashboard()
     {
-        var grid = Grid(1, 4); grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 250)); grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 118)); grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 159)); grid.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        var grid = Grid(1, 4); grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 275)); grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 118)); grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 159)); grid.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         _dashboard.AutoScroll = true; grid.Dock = DockStyle.Top; grid.Height = 570; _dashboard.Controls.Add(grid);
         _dashboard.SizeChanged += (_, _) =>
         {
-            int minimumHeight = 570 * DeviceDpi / 96;
+            int minimumHeight = 600 * DeviceDpi / 96;
             _dashboard.AutoScroll = _dashboard.ClientSize.Height < minimumHeight;
             grid.Height = Math.Max(minimumHeight, _dashboard.ClientSize.Height);
             _dashboard.AutoScrollMinSize = new Size(0, minimumHeight);
         };
-        var hero = Surface(new Padding(23, 17, 23, 20)); var heroGrid = Grid(2, 5); heroGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 74)); heroGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 26));
-        heroGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 25)); heroGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 43)); heroGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 41)); heroGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 29)); heroGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        var hero = Surface(new Padding(23, 17, 23, 20)); var heroGrid = Grid(2, 6); heroGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 74)); heroGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 26));
+        heroGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 25)); heroGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 43)); heroGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 41)); heroGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 29)); heroGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 22)); heroGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         heroGrid.Controls.Add(TextLabel("DEIN LAUFENDER RÜCKBLICK", 8, Cyan, FontStyle.Bold), 0, 0); var timerHeading = TextLabel("SITZUNGSDAUER", 8, Muted, FontStyle.Bold); timerHeading.TextAlign = ContentAlignment.MiddleRight; heroGrid.Controls.Add(timerHeading, 1, 0);
-        heroGrid.Controls.Add(_recordingState, 0, 1); _elapsed.TextAlign = ContentAlignment.MiddleRight; heroGrid.Controls.Add(_elapsed, 1, 1); heroGrid.Controls.Add(_recordingMessage, 0, 2); heroGrid.SetColumnSpan(_recordingMessage, 2); heroGrid.Controls.Add(_source, 0, 3); heroGrid.SetColumnSpan(_source, 2);
+        heroGrid.Controls.Add(_recordingState, 0, 1); _elapsed.TextAlign = ContentAlignment.MiddleRight; heroGrid.Controls.Add(_elapsed, 1, 1); heroGrid.Controls.Add(_recordingMessage, 0, 2); heroGrid.SetColumnSpan(_recordingMessage, 2); heroGrid.Controls.Add(_source, 0, 3); heroGrid.SetColumnSpan(_source, 2); heroGrid.Controls.Add(_sound, 0, 4); heroGrid.SetColumnSpan(_sound, 2);
         var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, Margin = Padding.Empty, WrapContents = false, Padding = new Padding(0, 7, 0, 0) }; _toggle.Size = new Size(204, 43); _pause.Size = new Size(122, 43); _protect.Size = new Size(235, 43);
-        _toggle.Click += async (_, _) => await RunActionAsync(_controller.ToggleRecordingAsync); _pause.Click += async (_, _) => await RunActionAsync(TogglePauseAsync); _protect.Click += async (_, _) => await RunActionAsync(_controller.ProtectRecentAsync); actions.Controls.AddRange([_toggle, _pause, _protect]); heroGrid.Controls.Add(actions, 0, 4); heroGrid.SetColumnSpan(actions, 2); hero.Controls.Add(heroGrid); grid.Controls.Add(hero, 0, 0);
+        _toggle.Click += async (_, _) => await RunActionAsync(_controller.ToggleRecordingAsync); _pause.Click += async (_, _) => await RunActionAsync(TogglePauseAsync); _protect.Click += async (_, _) => await RunActionAsync(_controller.ProtectRecentAsync); actions.Controls.AddRange([_toggle, _pause, _protect]); heroGrid.Controls.Add(actions, 0, 5); heroGrid.SetColumnSpan(actions, 2); hero.Controls.Add(heroGrid); grid.Controls.Add(hero, 0, 0);
         _tips.SetToolTip(_toggle, "Aufnahme starten oder Sitzung vollständig stoppen · Strg + Alt + F8"); _tips.SetToolTip(_pause, "Manuell pausieren und fortsetzen · Strg + Alt + F10"); _tips.SetToolTip(_protect, "Wichtige Abschnitte vor der automatischen Löschung schützen · Strg + Alt + F9");
         var metrics = Grid(4, 1); for (int i = 0; i < 4; i++) metrics.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25)); metrics.Controls.Add(Metric("KODIERUNG", _encoder, "H.264 · Hardware bevorzugt", false), 0, 0); metrics.Controls.Add(Metric("CPU-AUSLASTUNG", _cpu, "Programm + Encoder", false), 1, 0); metrics.Controls.Add(Metric("ARBEITSSPEICHER", _memory, "Programm + Encoder", false), 2, 0); metrics.Controls.Add(Metric("BILDRATE", _fps, "Bilder pro Sekunde", true), 3, 0); grid.Controls.Add(metrics, 0, 1);
         var storage = Surface(new Padding(23, 12, 23, 12)); var storageGrid = Grid(1, 5); storageGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 22)); storageGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 31)); storageGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 15)); storageGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 28)); storageGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -116,7 +127,7 @@ public sealed class MainForm : Form
         for (int i = 0; i < titles.Length; i++) { int tab = i; _settingNav[i] = ActionButton(titles[i]); _settingNav[i].Size = new Size(125, 36); _settingNav[i].Click += (_, _) => ShowSettingTab(tab); tabBar.Controls.Add(_settingNav[i]); _settingTabs[i] = Surface(new Padding(22, 17, 22, 16)); _settingTabs[i].Margin = Padding.Empty; _settingTabs[i].AutoScroll = true; _settingsFields.Controls.Add(_settingTabs[i]); }
         page.Controls.Add(tabBar, 0, 0); page.Controls.Add(_settingsHint, 0, 1); page.Controls.Add(_settingsFields, 0, 2);
         var sourceFields = SettingsGrid(_settingTabs[0]); AddHeading(sourceFields, "Was möchtest du aufnehmen?", "Ein Bildschirm und der Ton deines ausgewählten Ausgabegeräts."); AddField(sourceFields, "Bildschirm", _display); AddField(sourceFields, "Audioausgabe", _audio); AddOption(sourceFields, _audioEnabled); AddOption(sourceFields, _cursor); _audioEnabled.CheckedChanged += (_, _) => _audio.Enabled = _audioEnabled.Checked;
-        var sourceActions = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = Padding.Empty }; _refreshDevices.Size = new Size(192, 35); _refreshDevices.Click += async (_, _) => await RunActionAsync(async () => { await _controller.RefreshDevicesAsync(); LoadDevices(); }); sourceActions.Controls.Add(_refreshDevices); AddField(sourceFields, "", sourceActions, 47); AddHelp(sourceFields, "Nur die gewählte Audioausgabe wird aufgenommen.\nEin Gerätewechsel in Windows wird nach „Geräte aktualisieren“ sichtbar.");
+        var sourceActions = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = Padding.Empty }; _refreshDevices.Size = new Size(192, 35); _refreshDevices.Click += async (_, _) => await RunActionAsync(async () => { await _controller.RefreshDevicesAsync(); LoadDevices(); }); sourceActions.Controls.Add(_refreshDevices); var testAudio = ActionButton("Ton testen"); testAudio.Size = new Size(118, 35); testAudio.Click += async (_, _) => await TestAudioAsync(); sourceActions.Controls.Add(testAudio); var mixer = ActionButton("Mixer öffnen"); mixer.Size = new Size(128, 35); mixer.Click += (_, _) => RunSync(() => Process.Start(new ProcessStartInfo("ms-settings:apps-volume") { UseShellExecute = true })); sourceActions.Controls.Add(mixer); AddField(sourceFields, "", sourceActions, 47); AddWide(sourceFields, _audioTestResult, 48); AddHelp(sourceFields, "Nur die gewählte Audioausgabe wird aufgenommen.\nEin Gerätewechsel in Windows wird nach „Geräte aktualisieren“ sichtbar.");
         var qualityFields = SettingsGrid(_settingTabs[1]); AddHeading(qualityFields, "Wenig Last. Genug Detail.", "Die GPU übernimmt die Kodierung, sofern ein passender Encoder verfügbar ist.");
         _profile.Items.AddRange(["Ultra sparsam · 10 FPS · 1,5 Mbit/s", "Sparsam · 15 FPS · 3 Mbit/s (empfohlen)", "Standard · 30 FPS · 6 Mbit/s", "Detail · 30 FPS · 10 Mbit/s", "Benutzerdefiniert"]); _encoderChoice.Items.AddRange(["Auto · GPU bevorzugt", "NVIDIA · NVENC", "AMD · AMF", "Intel · Quick Sync", "Software · CPU"]);
         AddField(qualityFields, "Leistungsprofil", _profile); AddField(qualityFields, "Bildrate", WithUnit(_customFps, "FPS · weniger Bilder entlasten GPU und Speicher")); AddField(qualityFields, "Video-Bitrate", WithUnit(_customBitrate, "kbit/s · höher bedeutet mehr Details und größere Dateien")); AddField(qualityFields, "Encoder", _encoderChoice); AddOption(qualityFields, _software); AddWide(qualityFields, _qualityEstimate, 48);
@@ -124,26 +135,29 @@ public sealed class MainForm : Form
         var storageFields = SettingsGrid(_settingTabs[2]); AddHeading(storageFields, "Dein Rückblick hat ein Limit.", "Zeitlimit und Speicherlimit gelten gemeinsam. Gesicherte Abschnitte bleiben erhalten.");
         var directoryRow = Grid(2, 1); directoryRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); directoryRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100)); _directory.Margin = new Padding(0, 2, 7, 2); directoryRow.Controls.Add(_directory, 0, 0); var browse = ActionButton("Wählen …"); browse.Dock = DockStyle.Fill; browse.Margin = Padding.Empty;
         browse.Click += (_, _) => { using var dialog = new FolderBrowserDialog { Description = "Aufnahmeordner für ScreenDash wählen", UseDescriptionForTitle = true, SelectedPath = _directory.Text }; if (dialog.ShowDialog(this) == DialogResult.OK) _directory.Text = dialog.SelectedPath; }; directoryRow.Controls.Add(browse, 1, 0);
-        AddField(storageFields, "Aufnahmeordner", directoryRow); AddField(storageFields, "Abschnittslänge", WithUnit(_segment, "Minuten · einzeln abspielbare Videodateien")); AddField(storageFields, "Automatisch löschen nach", WithUnit(_retention, "Tagen · nur ungesicherte Abschnitte")); AddField(storageFields, "Speicherlimit", WithUnit(_maxStorage, "GB · älteste ungesicherte Abschnitte zuerst")); AddField(storageFields, "Freie Reserve", WithUnit(_minFree, "GB · bei Platzmangel stoppt die Aufnahme")); AddField(storageFields, "Rückblick sichern", WithUnit(_protectMinutes, "Minuten · für Schaltfläche und Tastenkürzel")); AddWide(storageFields, _quotaEstimate, 48); _retention.ValueChanged += (_, _) => UpdateEstimates(); _maxStorage.ValueChanged += (_, _) => UpdateEstimates();
+        AddField(storageFields, "Aufnahmeordner", directoryRow); AddOption(storageFields, _singleFile, 39); _singleFile.CheckedChanged += (_, _) => _segment.Enabled = !_singleFile.Checked; AddField(storageFields, "Abschnittslänge", WithUnit(_segment, "Minuten · einzeln abspielbare Videodateien")); AddField(storageFields, "Automatisch löschen nach", WithUnit(_retention, "Tagen · nur ungesicherte Abschnitte")); AddField(storageFields, "Speicherlimit", WithUnit(_maxStorage, "GB · älteste ungesicherte Abschnitte zuerst")); AddField(storageFields, "Freie Reserve", WithUnit(_minFree, "GB · bei Platzmangel stoppt die Aufnahme")); AddField(storageFields, "Rückblick sichern", WithUnit(_protectMinutes, "Minuten · für Schaltfläche und Tastenkürzel")); AddWide(storageFields, _quotaEstimate, 48); _retention.ValueChanged += (_, _) => UpdateEstimates(); _maxStorage.ValueChanged += (_, _) => UpdateEstimates();
         var automationFields = SettingsGrid(_settingTabs[3]); AddHeading(automationFields, "Läuft, wenn du es brauchst.", "ScreenDash arbeitet im Hintergrund und bleibt über den Infobereich erreichbar."); AddOption(automationFields, _startWithWindows, 39); AddOption(automationFields, _recordOnLaunch, 39); AddOption(automationFields, _pauseOnLock, 39); AddOption(automationFields, _minimizeOnRecord, 39); AddOption(automationFields, _notifications, 39); AddHelp(automationFields, "Tastenkürzel funktionieren auch bei minimiertem Fenster.\nStrg + Alt + F8   Start / Stopp    ·    F9   Sichern    ·    F10   Pause / Fortsetzen");
-        var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Padding = new Padding(0, 14, 0, 0), Margin = Padding.Empty }; _save.Size = new Size(242, 42); _discard.Size = new Size(130, 42); _save.Click += async (_, _) => await RunActionAsync(async () => { await _controller.SaveSettingsAsync(ReadSettings()); LoadSettings(); _footer.Text = "Einstellungen gespeichert."; }); _discard.Click += (_, _) => { LoadSettings(); _footer.Text = "Änderungen verworfen."; }; actions.Controls.AddRange([_save, _discard]); page.Controls.Add(actions, 0, 3); _settingsPage.Controls.Add(page); ShowSettingTab(0);
+        var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Padding = new Padding(0, 14, 0, 0), Margin = Padding.Empty }; _save.Size = new Size(242, 42); _discard.Size = new Size(130, 42); _save.Click += async (_, _) => await SaveSettingsAsync(); _discard.Click += (_, _) => { LoadSettings(); RefreshDashboard(); _footer.Text = "Änderungen verworfen."; }; actions.Controls.AddRange([_save, _discard]); page.Controls.Add(actions, 0, 3); _settingsPage.Controls.Add(page); ShowSettingTab(0);
+        _tips.SetToolTip(_save, "Geänderte Einstellungen übernehmen · Strg + S");
     }
 
     private void BuildRecordings()
     {
         var page = Grid(1, 5); page.RowStyles.Add(new RowStyle(SizeType.Absolute, 45)); page.RowStyles.Add(new RowStyle(SizeType.Absolute, 37)); page.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); page.RowStyles.Add(new RowStyle(SizeType.Absolute, 57)); page.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
-        var filters = Grid(3, 1); filters.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); filters.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 155)); filters.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 165)); _search.PlaceholderText = "Aufnahmen durchsuchen …"; _search.Margin = new Padding(0, 0, 12, 10); _archiveFilter.Items.AddRange(["Alle Aufnahmen", "Nur gesicherte", "Nur ungesicherte"]); _dateFilter.Items.AddRange(["Gesamter Zeitraum", "Letzte 24 Stunden", "Letzte 7 Tage"]); _archiveFilter.Margin = new Padding(0, 0, 12, 10); _dateFilter.Margin = new Padding(0, 0, 0, 10); _archiveFilter.SelectedIndex = 0; _dateFilter.SelectedIndex = 0;
-        filters.Controls.Add(_search, 0, 0); filters.Controls.Add(_archiveFilter, 1, 0); filters.Controls.Add(_dateFilter, 2, 0); _search.TextChanged += (_, _) => RefreshRecordings(false); _archiveFilter.SelectedIndexChanged += (_, _) => RefreshRecordings(false); _dateFilter.SelectedIndexChanged += (_, _) => RefreshRecordings(false); page.Controls.Add(filters, 0, 0);
+        var filters = Grid(4, 1); filters.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); filters.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 155)); filters.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 165)); filters.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 111)); _search.PlaceholderText = "Suchen · Strg + F"; _search.AccessibleName = "Aufnahmen durchsuchen"; _search.Margin = new Padding(0, 0, 10, 10); _archiveFilter.Items.AddRange(["Alle Aufnahmen", "Nur gesicherte", "Nur ungesicherte"]); _dateFilter.Items.AddRange(["Gesamter Zeitraum", "Letzte 24 Stunden", "Letzte 7 Tage"]); _archiveFilter.Margin = new Padding(0, 0, 10, 10); _dateFilter.Margin = new Padding(0, 0, 10, 10); _archiveFilter.SelectedIndex = 0; _dateFilter.SelectedIndex = 0;
+        filters.Controls.Add(_search, 0, 0); filters.Controls.Add(_archiveFilter, 1, 0); filters.Controls.Add(_dateFilter, 2, 0); _clearFilters.Dock = DockStyle.Fill; _clearFilters.Margin = new Padding(0, 0, 0, 10); _clearFilters.Font = new Font("Segoe UI", 8.5f); _clearFilters.Click += (_, _) => ResetArchiveFilters(); filters.Controls.Add(_clearFilters, 3, 0); _search.TextChanged += (_, _) => RefreshRecordings(false); _archiveFilter.SelectedIndexChanged += (_, _) => RefreshRecordings(false); _dateFilter.SelectedIndexChanged += (_, _) => RefreshRecordings(false); page.Controls.Add(filters, 0, 0);
         var summary = Grid(2, 1); summary.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); summary.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 125)); summary.Controls.Add(_recordingsSummary, 0, 0); var refresh = ActionButton("Aktualisieren"); refresh.Font = new Font("Segoe UI", 9); refresh.Dock = DockStyle.Fill; refresh.Margin = new Padding(0, 0, 0, 7); refresh.Click += (_, _) => RefreshRecordings(); summary.Controls.Add(refresh, 1, 0); page.Controls.Add(summary, 0, 1);
         _recordings.Dock = DockStyle.Fill; _recordings.BackgroundColor = Card; _recordings.BorderStyle = BorderStyle.None; _recordings.AllowUserToAddRows = false; _recordings.AllowUserToDeleteRows = false; _recordings.AllowUserToResizeRows = false; _recordings.RowHeadersVisible = false; _recordings.ReadOnly = true; _recordings.MultiSelect = true; _recordings.SelectionMode = DataGridViewSelectionMode.FullRowSelect; _recordings.AutoGenerateColumns = false; _recordings.EnableHeadersVisualStyles = false; _recordings.ColumnHeadersHeight = 42; _recordings.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing; _recordings.GridColor = Line; _recordings.RowTemplate.Height = 47;
         _recordings.DefaultCellStyle = new DataGridViewCellStyle { BackColor = Card, ForeColor = Ink, SelectionBackColor = Color.FromArgb(37, 67, 83), SelectionForeColor = Ink, Padding = new Padding(10, 0, 0, 0), Font = new Font("Segoe UI", 9.5f) }; _recordings.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(22, 29, 40); _recordings.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle { BackColor = Input, ForeColor = Muted, SelectionBackColor = Input, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold), Padding = new Padding(10, 0, 0, 0) }; _recordings.CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal; _recordings.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.None;
         _recordings.Columns.Add(new DataGridViewTextBoxColumn { Name = "Time", HeaderText = "BEGINN", Width = 150 }); _recordings.Columns.Add(new DataGridViewTextBoxColumn { Name = "File", HeaderText = "AUFNAHME / NOTIZ", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill, MinimumWidth = 210 }); _recordings.Columns.Add(new DataGridViewTextBoxColumn { Name = "Size", HeaderText = "GRÖSSE", Width = 88 }); _recordings.Columns.Add(new DataGridViewTextBoxColumn { Name = "Protect", HeaderText = "SCHUTZ", Width = 110 }); _recordings.Columns.Add(new DataGridViewTextBoxColumn { Name = "State", HeaderText = "STATUS", Width = 105 });
+        foreach (DataGridViewColumn column in _recordings.Columns) { column.SortMode = DataGridViewColumnSortMode.Programmatic; column.HeaderCell.ToolTipText = "Nach dieser Spalte sortieren; erneut klicken, um die Reihenfolge umzukehren."; }
+        _recordings.ColumnHeaderMouseClick += (_, e) => { if (e.ColumnIndex >= 0) SortArchive(_recordings.Columns[e.ColumnIndex].Name); };
         _recordings.SelectionChanged += (_, _) => { if (!_refreshingArchive) UpdateRecordingActions(); }; _recordings.CellDoubleClick += (_, e) => { if (e.RowIndex >= 0) PlaySelected(); }; _recordings.CellMouseDown += (_, e) => { if (e.Button != MouseButtons.Right || e.RowIndex < 0) return; var row = _recordings.Rows[e.RowIndex]; if (!row.Selected) { _recordings.ClearSelection(); row.Selected = true; } _recordings.CurrentCell = row.Cells[0]; };
-        var menu = DarkMenu(); menu.Items.Add("Abspielen", null, (_, _) => PlaySelected()); menu.Items.Add("Im Explorer anzeigen", null, (_, _) => RevealSelected()); menu.Items.Add("Notiz ändern …", null, async (_, _) => await LabelSelectedAsync()); menu.Items.Add(new ToolStripSeparator()); menu.Items.Add("Auswahl sichern", null, async (_, _) => await ProtectSelectedAsync(true)); menu.Items.Add("Auswahl freigeben", null, async (_, _) => await ProtectSelectedAsync(false)); menu.Items.Add("Auswahl löschen …", null, async (_, _) => await DeleteSelectedAsync()); menu.Opening += (_, e) => { e.Cancel = _uiBusy || SelectedRecordings().Length == 0; }; _recordings.ContextMenuStrip = menu;
+        AddArchiveMenuItem("Play", "Abspielen", "Eingabe", (_, _) => PlaySelected()); AddArchiveMenuItem("Reveal", "Im Explorer anzeigen", "", (_, _) => RevealSelected()); AddArchiveMenuItem("Export", "Als MP4 exportieren …", "Strg + E", async (_, _) => await ExportSelectedAsync()); AddArchiveMenuItem("Label", "Notiz ändern …", "F2", async (_, _) => await LabelSelectedAsync()); _archiveMenu.Items.Add(new ToolStripSeparator()); AddArchiveMenuItem("Protect", "Auswahl sichern", "Strg + G", async (_, _) => await ProtectSelectedAsync(true)); AddArchiveMenuItem("Release", "Auswahl freigeben", "Strg + Umschalt + G", async (_, _) => await ProtectSelectedAsync(false)); AddArchiveMenuItem("Delete", "Auswahl löschen …", "Entf", async (_, _) => await DeleteSelectedAsync()); _archiveMenu.Opening += (_, e) => { UpdateRecordingActions(); e.Cancel = _uiBusy || SelectedRecordings().Length == 0; }; _recordings.ContextMenuStrip = _archiveMenu;
         var tableHost = Surface(new Padding(1)); tableHost.Margin = Padding.Empty; tableHost.Controls.Add(_recordings); _emptyArchive.Dock = DockStyle.Fill; _emptyArchive.TextAlign = ContentAlignment.MiddleCenter; _emptyArchive.BackColor = Card; tableHost.Controls.Add(_emptyArchive); page.Controls.Add(tableHost, 0, 2);
-        var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Padding = new Padding(0, 12, 0, 0), Margin = Padding.Empty }; _play.Size = new Size(104, 39); _protectSelected.Size = new Size(95, 39); _releaseSelected.Size = new Size(105, 39); _export.Size = new Size(142, 39); _labelSelected.Size = new Size(103, 39); _delete.Size = new Size(94, 39); foreach (var button in new[] { _play, _protectSelected, _releaseSelected, _export, _labelSelected, _delete }) { button.Font = new Font("Segoe UI", 9); button.Margin = new Padding(0, 0, 7, 0); } _delete.ForeColor = Color.FromArgb(246, 151, 153);
-        _play.Click += (_, _) => PlaySelected(); _protectSelected.Click += async (_, _) => await ProtectSelectedAsync(true); _releaseSelected.Click += async (_, _) => await ProtectSelectedAsync(false); _export.Click += async (_, _) => await ExportSelectedAsync(); _labelSelected.Click += async (_, _) => await LabelSelectedAsync(); _delete.Click += async (_, _) => await DeleteSelectedAsync(); actions.Controls.AddRange([_play, _protectSelected, _releaseSelected, _export, _labelSelected, _delete]); page.Controls.Add(actions, 0, 3);
-        var progress = Grid(2, 1); progress.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); progress.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 160)); progress.Controls.Add(_archiveProgress, 0, 0); _exportProgress.Margin = new Padding(0, 6, 0, 6); progress.Controls.Add(_exportProgress, 1, 0); page.Controls.Add(progress, 0, 4); _recordingsPage.Controls.Add(page); _tips.SetToolTip(_labelSelected, "Eine persönliche Notiz für den ausgewählten Abschnitt hinterlegen"); _tips.SetToolTip(_delete, "Ausgewählte abgeschlossene Aufnahmen dauerhaft löschen; aktive Abschnitte bleiben erhalten");
+        var actions = Grid(6, 1); actions.Padding = new Padding(0, 12, 0, 4); float[] actionWidths = [15, 14, 16, 23, 17, 15]; Button[] archiveButtons = [_play, _protectSelected, _releaseSelected, _export, _labelSelected, _delete]; for (int i = 0; i < archiveButtons.Length; i++) { actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, actionWidths[i])); var button = archiveButtons[i]; button.Dock = DockStyle.Fill; button.Font = new Font("Segoe UI", 9); button.Margin = new Padding(0, 0, i == archiveButtons.Length - 1 ? 0 : 7, 0); actions.Controls.Add(button, i, 0); } _delete.ForeColor = Color.FromArgb(246, 151, 153);
+        _play.Click += (_, _) => PlaySelected(); _protectSelected.Click += async (_, _) => await ProtectSelectedAsync(true); _releaseSelected.Click += async (_, _) => await ProtectSelectedAsync(false); _export.Click += async (_, _) => await ExportSelectedAsync(); _labelSelected.Click += async (_, _) => await LabelSelectedAsync(); _delete.Click += async (_, _) => await DeleteSelectedAsync(); page.Controls.Add(actions, 0, 3);
+        var progress = _archiveProgressLayout; progress.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); progress.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 0)); progress.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 0)); progress.Controls.Add(_archiveProgress, 0, 0); _exportProgress.Margin = new Padding(0, 6, 10, 6); progress.Controls.Add(_exportProgress, 1, 0); _cancelExport.Dock = DockStyle.Fill; _cancelExport.Font = new Font("Segoe UI", 8.5f); _cancelExport.Margin = new Padding(0, 2, 0, 2); _cancelExport.Visible = false; _cancelExport.Click += (_, _) => CancelExport(); progress.Controls.Add(_cancelExport, 2, 0); page.Controls.Add(progress, 0, 4); _recordingsPage.Controls.Add(page); _tips.SetToolTip(_labelSelected, "Eine persönliche Notiz für den ausgewählten Abschnitt hinterlegen · F2"); _tips.SetToolTip(_delete, "Ausgewählte abgeschlossene Aufnahmen dauerhaft löschen; aktive Abschnitte bleiben erhalten · Entf"); _tips.SetToolTip(_clearFilters, "Suchtext und Zeitraum zurücksetzen · Strg + Umschalt + F");
     }
 
     private void ShowPage(int page)
@@ -158,13 +172,24 @@ public sealed class MainForm : Form
     private void LoadSettings()
     {
         _loadingSettings = true;
-        try { var s = _controller.Settings; LoadDevices(false); _audioEnabled.Checked = s.AudioEnabled; _cursor.Checked = s.CaptureCursor; _software.Checked = s.AllowSoftwareEncoding; _pauseOnLock.Checked = s.PauseOnLock; _recordOnLaunch.Checked = s.RecordOnLaunch; _startWithWindows.Checked = s.StartWithWindows; _notifications.Checked = s.ShowNotifications; _minimizeOnRecord.Checked = s.MinimizeOnRecord; _directory.Text = s.RecordingDirectory; SetNumber(_segment, s.SegmentMinutes); SetNumber(_retention, s.RetentionDays); SetNumber(_maxStorage, s.MaxStorageGb); SetNumber(_minFree, s.MinFreeSpaceGb); SetNumber(_protectMinutes, s.ProtectMinutes); SetNumber(_customFps, s.Fps); SetNumber(_customBitrate, s.VideoBitrateKbps); _profile.SelectedIndex = (s.Fps, s.VideoBitrateKbps) switch { (10, 1500) => 0, (15, 3000) => 1, (30, 6000) => 2, (30, 10000) => 3, _ => 4 }; _encoderChoice.SelectedIndex = s.EncoderMode.ToUpperInvariant() switch { "NVIDIA" => 1, "AMD" => 2, "INTEL" => 3, "SOFTWARE" => 4, _ => 0 }; _audio.Enabled = _audioEnabled.Checked; }
-        finally { _loadingSettings = false; } UpdateEstimates();
+        try { var s = _controller.Settings; LoadDevices(false); _audioEnabled.Checked = s.AudioEnabled; _cursor.Checked = s.CaptureCursor; _software.Checked = s.AllowSoftwareEncoding; _pauseOnLock.Checked = s.PauseOnLock; _recordOnLaunch.Checked = s.RecordOnLaunch; _startWithWindows.Checked = s.StartWithWindows; _notifications.Checked = s.ShowNotifications; _minimizeOnRecord.Checked = s.MinimizeOnRecord; _directory.Text = s.RecordingDirectory; _singleFile.Checked = s.SingleFile; _segment.Enabled = !s.SingleFile; SetNumber(_segment, s.SegmentMinutes); SetNumber(_retention, s.RetentionDays); SetNumber(_maxStorage, s.MaxStorageGb); SetNumber(_minFree, s.MinFreeSpaceGb); SetNumber(_protectMinutes, s.ProtectMinutes); SetNumber(_customFps, s.Fps); SetNumber(_customBitrate, s.VideoBitrateKbps); _profile.SelectedIndex = (s.Fps, s.VideoBitrateKbps) switch { (10, 1500) => 0, (15, 3000) => 1, (30, 6000) => 2, (30, 10000) => 3, _ => 4 }; _encoderChoice.SelectedIndex = s.EncoderMode.ToUpperInvariant() switch { "NVIDIA" => 1, "AMD" => 2, "INTEL" => 3, "SOFTWARE" => 4, _ => 0 }; _audio.Enabled = _audioEnabled.Checked; }
+        finally { _loadingSettings = false; } _settingsBaseline = SettingsFingerprint(); _settingsDirty = false; UpdateEstimates();
     }
     private void LoadDevices(bool preserveSelection = true)
     {
+        bool previousLoading = _loadingSettings; _loadingSettings = true;
+        try
+        {
         string displayId = preserveSelection ? (_display.SelectedItem as DisplaySource)?.Id ?? _controller.Settings.DisplayId : _controller.Settings.DisplayId; string audioId = preserveSelection ? (_audio.SelectedItem as AudioSource)?.Id ?? _controller.Settings.AudioDeviceId : _controller.Settings.AudioDeviceId;
+        var previousDisplay = _display.SelectedItem as DisplaySource;
         _display.Items.Clear(); foreach (var source in _controller.Displays) _display.Items.Add(source); _display.SelectedIndex = FindSource(_display, item => ((DisplaySource)item).Id == displayId); _audio.Items.Clear(); foreach (var source in _controller.AudioDevices) _audio.Items.Add(source); _audio.SelectedIndex = FindSource(_audio, item => ((AudioSource)item).Id == audioId);
+        if (!string.IsNullOrEmpty(displayId) && !_controller.Displays.Any(d => d.Id == displayId))
+        { _display.Items.Add(new DisplaySource(displayId, (previousDisplay?.Name ?? "Gespeicherter Bildschirm") + " · Nicht verbunden", -1, -1, 0, 0, 0, 0)); _display.SelectedIndex = _display.Items.Count - 1; }
+        if (!string.IsNullOrEmpty(audioId) && !_controller.AudioDevices.Any(d => d.Id == audioId))
+        { _audio.Items.Add(new AudioSource(audioId, "Gespeicherte Audioausgabe · Nicht verfügbar")); _audio.SelectedIndex = _audio.Items.Count - 1; }
+        }
+        finally { _loadingSettings = previousLoading; }
+        if (!_loadingSettings && _settingsBaseline.Length > 0) UpdateDirtyState();
     }
     private static int FindSource(ComboBox choice, Func<object, bool> predicate) { for (int i = 0; i < choice.Items.Count; i++) if (choice.Items[i] is { } source && predicate(source)) return i; return choice.Items.Count > 0 ? 0 : -1; }
     private void ApplyProfile() { if (_loadingSettings || _profile.SelectedIndex is < 0 or > 3) return; _updatingProfile = true; try { (int fps, int bitrate) = _profile.SelectedIndex switch { 0 => (10, 1500), 1 => (15, 3000), 2 => (30, 6000), _ => (30, 10000) }; SetNumber(_customFps, fps); SetNumber(_customBitrate, bitrate); } finally { _updatingProfile = false; } UpdateEstimates(); }
@@ -179,12 +204,16 @@ public sealed class MainForm : Form
     private static string FormatHours(double hours) => hours >= 48 ? $"{hours / 24:0.0} Tage" : $"{hours:0.0} Stunden";
     private AppSettings ReadSettings()
     {
-        if (_display.SelectedItem is not DisplaySource display) throw new InvalidOperationException("Es ist kein Bildschirm verfügbar. Bitte Geräte aktualisieren."); if (_audioEnabled.Checked && _audio.SelectedItem is not AudioSource) throw new InvalidOperationException("Bitte ein Audioausgabegerät wählen oder Systemton deaktivieren."); if (string.IsNullOrWhiteSpace(_directory.Text)) throw new InvalidOperationException("Bitte einen Aufnahmeordner wählen.");
-        var s = _controller.Settings.Clone(); s.DisplayId = display.Id; s.AudioDeviceId = (_audio.SelectedItem as AudioSource)?.Id ?? ""; s.AudioEnabled = _audioEnabled.Checked; s.CaptureCursor = _cursor.Checked; s.AllowSoftwareEncoding = _software.Checked; s.PauseOnLock = _pauseOnLock.Checked; s.RecordOnLaunch = _recordOnLaunch.Checked; s.StartWithWindows = _startWithWindows.Checked; s.ShowNotifications = _notifications.Checked; s.MinimizeOnRecord = _minimizeOnRecord.Checked; s.RecordingDirectory = _directory.Text.Trim(); s.SegmentMinutes = (int)_segment.Value; s.RetentionDays = (int)_retention.Value; s.MaxStorageGb = (int)_maxStorage.Value; s.MinFreeSpaceGb = (int)_minFree.Value; s.ProtectMinutes = (int)_protectMinutes.Value; s.Fps = (int)_customFps.Value; s.VideoBitrateKbps = (int)_customBitrate.Value; s.EncoderMode = _encoderChoice.SelectedIndex switch { 1 => "NVIDIA", 2 => "AMD", 3 => "Intel", 4 => "Software", _ => "Auto" }; if (s.EncoderMode == "Software" && !s.AllowSoftwareEncoding) throw new InvalidOperationException("Für den Software-Encoder bitte „CPU-Kodierung als Ausweichlösung erlauben“ aktivieren."); return s;
+        if (_display.SelectedItem is not DisplaySource display || display.AdapterIndex < 0) throw new InvalidOperationException("Es ist kein Bildschirm verfügbar. Bitte Geräte aktualisieren."); if (_audioEnabled.Checked && _audio.SelectedItem is not AudioSource) throw new InvalidOperationException("Bitte ein Audioausgabegerät wählen oder Systemton deaktivieren."); if (string.IsNullOrWhiteSpace(_directory.Text)) throw new InvalidOperationException("Bitte einen Aufnahmeordner wählen.");
+        var s = _controller.Settings.Clone(); s.DisplayId = display.Id; s.AudioDeviceId = (_audio.SelectedItem as AudioSource)?.Id ?? ""; s.AudioEnabled = _audioEnabled.Checked; s.CaptureCursor = _cursor.Checked; s.AllowSoftwareEncoding = _software.Checked; s.PauseOnLock = _pauseOnLock.Checked; s.RecordOnLaunch = _recordOnLaunch.Checked; s.StartWithWindows = _startWithWindows.Checked; s.ShowNotifications = _notifications.Checked; s.MinimizeOnRecord = _minimizeOnRecord.Checked; s.RecordingDirectory = _directory.Text.Trim(); s.SingleFile = _singleFile.Checked; s.SegmentMinutes = (int)_segment.Value; s.RetentionDays = (int)_retention.Value; s.MaxStorageGb = (int)_maxStorage.Value; s.MinFreeSpaceGb = (int)_minFree.Value; s.ProtectMinutes = (int)_protectMinutes.Value; s.Fps = (int)_customFps.Value; s.VideoBitrateKbps = (int)_customBitrate.Value; s.EncoderMode = _encoderChoice.SelectedIndex switch { 1 => "NVIDIA", 2 => "AMD", 3 => "Intel", 4 => "Software", _ => "Auto" }; if (s.EncoderMode == "Software" && !s.AllowSoftwareEncoding) throw new InvalidOperationException("Für den Software-Encoder bitte „CPU-Kodierung als Ausweichlösung erlauben“ aktivieren."); return s;
     }
 
     private Task TogglePauseAsync() => _controller.Status.Paused ? _controller.ResumeAsync() : _controller.PauseAsync();
-    private void ControllerChanged() => OnUi(RefreshDashboard);
+    private void ControllerChanged()
+    {
+        if (IsDisposed || !IsHandleCreated || Interlocked.Exchange(ref _dashboardUpdateQueued, 1) != 0) return;
+        OnUi(() => { Interlocked.Exchange(ref _dashboardUpdateQueued, 0); if (!IsDisposed) RefreshDashboard(); });
+    }
     private void ControllerNotice(string message) => OnUi(() => { _footer.Text = message; Notify(message); });
     private void Notify(string message, ToolTipIcon icon = ToolTipIcon.Info) { if (_controller.Settings.ShowNotifications) _tray.ShowBalloonTip(4500, "ScreenDash", message, icon); }
     private void OnUi(Action action) { if (IsDisposed || Disposing) return; if (InvokeRequired) { try { BeginInvoke((Action)(() => { if (!IsDisposed && !Disposing) action(); })); } catch (InvalidOperationException) { } return; } action(); }
@@ -194,37 +223,76 @@ public sealed class MainForm : Form
         _headerState.Text = status.Recording ? "●  AUFNAHME LÄUFT" : busy ? "●  WIRD BEARBEITET" : paused ? "●  PAUSIERT" : "●  BEREIT"; _headerState.ForeColor = status.Recording ? Cyan : paused ? Amber : Muted;
         _recordingState.Text = status.Recording ? "Dein Rückblick läuft" : paused ? "Aufnahme pausiert" : busy ? "Einen Moment …" : "Bereit für deinen Rückblick"; _recordingMessage.Text = !string.IsNullOrWhiteSpace(status.PauseReason) && paused ? status.PauseReason : status.Message; _elapsed.Text = $"{(int)status.Elapsed.TotalHours:00}:{status.Elapsed.Minutes:00}:{status.Elapsed.Seconds:00}";
         _encoder.Text = string.IsNullOrWhiteSpace(status.Encoder) ? "GPU bevorzugt" : status.Encoder.Replace("NVIDIA ", "").Replace("Intel ", ""); _cpu.Text = $"{Math.Max(0, status.CpuPercent):0.0} %"; _memory.Text = $"{status.MemoryBytes / 1024d / 1024d:0} MB"; _fps.Text = $"{(status.Recording ? status.Fps : s.Fps):0.#} FPS";
-        var display = _controller.Displays.FirstOrDefault(d => d.Id == s.DisplayId) ?? _controller.Displays.FirstOrDefault(); _source.Text = $"{display?.Name ?? "Kein Bildschirm"}   ·   {(s.AudioEnabled ? "Systemton an" : "Ohne Ton")}   ·   {s.SegmentMinutes} Min. pro Abschnitt";
-        _toggle.Text = armed ? "■  Aufnahme stoppen" : "●  Aufnahme starten"; _toggle.Enabled = !busy; _pause.Text = paused ? "▶  Fortsetzen" : "Ⅱ  Pause"; _pause.Enabled = !busy && armed; _protect.Text = $"◇  Letzte {s.ProtectMinutes} Min. sichern"; _protect.Enabled = !busy;
-        _trayToggle.Text = armed ? "Aufnahme stoppen" : "Aufnahme starten"; _trayToggle.Enabled = !busy; _trayPause.Text = paused ? "Aufnahme fortsetzen" : "Aufnahme pausieren"; _trayPause.Enabled = _pause.Enabled; _trayProtect.Text = $"Letzte {s.ProtectMinutes} Min. sichern"; _trayProtect.Enabled = !busy; _tray.Text = status.Recording ? "ScreenDash · Aufnahme läuft" : paused ? "ScreenDash · pausiert" : "ScreenDash · " + (busy ? "arbeitet" : "bereit");
-        _settingsFields.Enabled = !armed && !busy; _save.Enabled = !armed && !busy; _discard.Enabled = !busy; _settingsHint.Text = armed ? "Sitzung aktiv. Stoppe die Aufnahme, um diese Einstellungen zu ändern." : "Änderungen werden erst mit „Einstellungen speichern“ übernommen."; _settingsHint.ForeColor = armed ? Amber : Muted;
+        var display = string.IsNullOrEmpty(s.DisplayId) ? _controller.Displays.FirstOrDefault() : _controller.Displays.FirstOrDefault(d => d.Id == s.DisplayId); _source.Text = $"{display?.Name ?? "Kein Bildschirm"}   ·   {(s.AudioEnabled ? "Systemton an" : "Ohne Ton")}   ·   {(s.SingleFile ? "Eine durchgehende Datei" : $"{s.SegmentMinutes} Min. pro Abschnitt")}";
+        _sound.Text = !s.AudioEnabled ? "Ton ausgeschaltet" : !status.Recording ? "Tonprüfung unter Einstellungen → Quelle" : status.AudioPeak > 0.0001 ? $"● Ton empfangen · {status.AudioPeak * 100:0} % · {status.AudioDevice}" : $"○ Kein Ton gerade · {status.AudioDevice} · Bei Spielton die Audioausgabe prüfen"; _sound.ForeColor = status.Recording && s.AudioEnabled && status.AudioPeak <= 0.0001 ? Amber : Cyan;
+        _toggle.Text = armed ? "■  Aufnahme stoppen" : "●  Aufnahme starten"; _toggle.Enabled = !busy; _pause.Text = paused ? "▶  Fortsetzen" : "Ⅱ  Pause"; _pause.Enabled = !busy && armed; _protect.Text = s.SingleFile ? "◇  Aufnahme sichern" : $"◇  Letzte {s.ProtectMinutes} Min. sichern"; _tips.SetToolTip(_protect, s.SingleFile ? "Sichert die gesamte laufende Datei sowie Aufnahmen aus den letzten eingestellten Minuten." : "Sichert ganze Abschnitte aus dem gewählten Zeitraum."); _protect.Enabled = !busy;
+        _trayToggle.Text = armed ? "Aufnahme stoppen" : "Aufnahme starten"; _trayToggle.Enabled = !busy; _trayPause.Text = paused ? "Aufnahme fortsetzen" : "Aufnahme pausieren"; _trayPause.Enabled = _pause.Enabled; _trayProtect.Text = s.SingleFile ? "Aufnahme sichern" : $"Letzte {s.ProtectMinutes} Min. sichern"; _trayProtect.Enabled = !busy; _tray.Text = status.Recording ? "ScreenDash · Aufnahme läuft" : paused ? "ScreenDash · pausiert" : "ScreenDash · " + (busy ? "arbeitet" : "bereit");
+        _settingsFields.Enabled = !armed && !busy; _save.Enabled = !armed && !busy && _settingsDirty; _discard.Enabled = !busy && _settingsDirty; _settingsHint.Text = armed ? "Sitzung aktiv. Stoppe die Aufnahme, um diese Einstellungen zu ändern." : _settingsDirty ? "● Ungespeicherte Änderungen · Strg + S zum Speichern" : "Einstellungen sind gespeichert."; _settingsHint.ForeColor = armed || _settingsDirty ? Amber : Muted;
         if (status.Storage is { } storage) { _storage.Text = $"{FormatBytes(storage.TotalBytes)} von {s.MaxStorageGb} GB belegt"; _storageDetail.Text = $"{FormatBytes(storage.FreeBytes)} frei auf dem Laufwerk   ·   {FormatBytes(storage.ProtectedBytes)} gesichert   ·   {s.MinFreeSpaceGb} GB Reserve"; _storageMeter.Fraction = Math.Clamp(storage.TotalBytes / (s.MaxStorageGb * 1024d * 1024d * 1024d), 0, 1); _storageMeter.ProtectedFraction = Math.Clamp(storage.ProtectedBytes / (s.MaxStorageGb * 1024d * 1024d * 1024d), 0, 1); _storageMeter.Warning = !storage.CanRecord; var estimate = RecordingEstimates.Calculate(s, storage.ProtectedBytes, storage.FreeBytes); _storageEstimate.Text = !storage.CanRecord ? storage.Message : $"Ungesicherte Aufnahmen: max. {s.RetentionDays} Tage   ·   Bei Daueraufnahme ungefähr {FormatHours(estimate.EffectiveRetentionHours)} im Rückblick"; _storageEstimate.ForeColor = storage.CanRecord ? Cyan : Amber; }
         if (status.Recording && !_wasRecording && s.MinimizeOnRecord && Visible) BeginInvoke((Action)Hide); _wasRecording = status.Recording;
-        if (_page == 2 && Stopwatch.GetElapsedTime(_lastRecordingsRefresh).TotalSeconds >= 10 && !_uiBusy) RefreshRecordings(); UpdateRecordingActions();
+        if (Visible && _page == 2 && !_archiveLoading && Stopwatch.GetElapsedTime(_lastRecordingsRefresh).TotalSeconds >= 10 && !_uiBusy) RefreshRecordings(); UpdateRecordingActions();
     }
 
     private void RefreshRecordings(bool reload = true)
     {
-        if (_refreshingArchive || _recordings.Columns.Count == 0) return; _lastRecordingsRefresh = Stopwatch.GetTimestamp(); _refreshingArchive = true;
+        if (reload) { _ = ReloadArchiveAsync(); return; }
+        if (_refreshingArchive || _recordings.Columns.Count == 0 || IsDisposed) return; _refreshingArchive = true;
         try
         {
-            var selected = SelectedRecordings().Select(r => r.Path).ToHashSet(StringComparer.OrdinalIgnoreCase); int scroll = _recordings.FirstDisplayedScrollingRowIndex; string query = _search.Text.Trim(); DateTime cutoff = _dateFilter.SelectedIndex switch { 1 => DateTime.UtcNow.AddHours(-24), 2 => DateTime.UtcNow.AddDays(-7), _ => DateTime.MinValue }; if (reload) _archiveCache = _controller.GetRecordings(); var all = _archiveCache;
-            var recordings = all.Where(r => r.StartedUtc >= cutoff && (_archiveFilter.SelectedIndex != 1 || r.Protected) && (_archiveFilter.SelectedIndex != 2 || !r.Protected) && (query.Length == 0 || r.FileName.Contains(query, StringComparison.OrdinalIgnoreCase) || r.Label.Contains(query, StringComparison.OrdinalIgnoreCase))).OrderByDescending(r => r.StartedUtc).ToArray();
-            _recordings.SuspendLayout(); _recordings.Rows.Clear();
-            foreach (var item in recordings) { string title = string.IsNullOrWhiteSpace(item.Label) ? item.FileName : item.Label; int index = _recordings.Rows.Add(item.StartedUtc.ToLocalTime().ToString("dd.MM.yy  HH:mm"), title, FormatBytes(item.Bytes), item.Protected ? "◇  Gesichert" : "Automatisch", item.Active ? "●  Läuft" : "Fertig"); var row = _recordings.Rows[index]; row.Tag = item; row.Cells[1].ToolTipText = string.IsNullOrWhiteSpace(item.Label) ? item.FileName : item.Label + "\n" + item.FileName; if (item.Protected) row.Cells[3].Style.ForeColor = Violet; if (item.Active) row.Cells[4].Style.ForeColor = Cyan; }
-            _recordings.ClearSelection(); foreach (DataGridViewRow row in _recordings.Rows) if (row.Tag is RecordingInfo item && selected.Contains(item.Path)) row.Selected = true; if (scroll >= 0 && _recordings.Rows.Count > 0) _recordings.FirstDisplayedScrollingRowIndex = Math.Min(scroll, _recordings.Rows.Count - 1); _recordings.ResumeLayout();
+            var selected = SelectedRecordings().Select(r => r.Path).ToHashSet(StringComparer.OrdinalIgnoreCase); int scroll = _recordings.FirstDisplayedScrollingRowIndex; string query = _search.Text.Trim(); DateTime cutoff = _dateFilter.SelectedIndex switch { 1 => DateTime.UtcNow.AddHours(-24), 2 => DateTime.UtcNow.AddDays(-7), _ => DateTime.MinValue }; var all = _archiveCache;
+            var filtered = all.Where(r => r.StartedUtc >= cutoff && (_archiveFilter.SelectedIndex != 1 || r.Protected) && (_archiveFilter.SelectedIndex != 2 || !r.Protected) && (query.Length == 0 || r.FileName.Contains(query, StringComparison.OrdinalIgnoreCase) || r.Label.Contains(query, StringComparison.OrdinalIgnoreCase)));
+            Func<RecordingInfo, IComparable> sortKey = _archiveSortColumn switch { "Size" => r => r.Bytes, "File" => r => string.IsNullOrWhiteSpace(r.Label) ? r.FileName : r.Label, "Protect" => r => r.Protected, "State" => r => r.Active, _ => r => r.StartedUtc };
+            var recordings = (_archiveSortDescending ? filtered.OrderByDescending(sortKey) : filtered.OrderBy(sortKey)).ThenBy(r => r.Path, StringComparer.OrdinalIgnoreCase).ToArray();
+            bool sameRows = recordings.Length == _recordings.Rows.Count && recordings.Select((item, i) => (_recordings.Rows[i].Tag as RecordingInfo)?.Path == item.Path).All(same => same);
+            _recordings.SuspendLayout(); if (!sameRows) _recordings.Rows.Clear();
+            for (int i = 0; i < recordings.Length; i++)
+            {
+                var item = recordings[i]; string title = string.IsNullOrWhiteSpace(item.Label) ? item.FileName : item.Label;
+                if (!sameRows) _recordings.Rows.Add(); var row = _recordings.Rows[i];
+                if (Equals(row.Tag, item)) continue;
+                object[] values = [item.StartedUtc.ToLocalTime().ToString("dd.MM.yy  HH:mm"), title, FormatBytes(item.Bytes), item.Protected ? "◇  Gesichert" : "Automatisch", item.Active ? "●  Läuft" : "Fertig"];
+                for (int column = 0; column < values.Length; column++) if (!Equals(row.Cells[column].Value, values[column])) row.Cells[column].Value = values[column];
+                row.Tag = item; row.Cells[1].ToolTipText = string.IsNullOrWhiteSpace(item.Label) ? item.FileName : item.Label + "\n" + item.FileName; row.Cells[3].Style.ForeColor = item.Protected ? Violet : Ink; row.Cells[4].Style.ForeColor = item.Active ? Cyan : Ink;
+            }
+            if (!sameRows) { _recordings.ClearSelection(); foreach (DataGridViewRow row in _recordings.Rows) if (row.Tag is RecordingInfo item && selected.Contains(item.Path)) row.Selected = true; if (scroll >= 0 && _recordings.Rows.Count > 0) _recordings.FirstDisplayedScrollingRowIndex = Math.Min(scroll, _recordings.Rows.Count - 1); } _recordings.ResumeLayout();
             _emptyArchive.Visible = recordings.Length == 0; if (_emptyArchive.Visible) { _emptyArchive.Text = all.Count == 0 ? "Noch kein Rückblick vorhanden\n\nStarte eine Aufnahme. Deine Abschnitte erscheinen automatisch hier." : "Keine passenden Aufnahmen\n\nÄndere den Suchtext oder die Filter."; _emptyArchive.BringToFront(); }
-            _recordingsSummary.Text = $"{recordings.Length} von {all.Count} Abschnitten   ·   {FormatBytes(recordings.Sum(r => r.Bytes))}   ·   {recordings.Count(r => r.Protected)} gesichert";
+            _recordingsSummary.Text = $"{recordings.Length} von {all.Count} Aufnahmen   ·   {FormatBytes(recordings.Sum(r => r.Bytes))}   ·   {recordings.Count(r => r.Protected)} gesichert";
+            foreach (DataGridViewColumn column in _recordings.Columns) column.HeaderCell.SortGlyphDirection = column.Name == _archiveSortColumn ? (_archiveSortDescending ? SortOrder.Descending : SortOrder.Ascending) : SortOrder.None;
         }
         catch (Exception ex) { ShowError(ex); } finally { _refreshingArchive = false; _recordings.ResumeLayout(); UpdateRecordingActions(); }
     }
+    private async Task ReloadArchiveAsync()
+    {
+        if (IsDisposed || _exitInProgress) return;
+        _lastRecordingsRefresh = Stopwatch.GetTimestamp();
+        if (_archiveLoading) { _archiveReloadPending = true; return; }
+        _archiveLoading = true; _archiveLoadError = ""; UpdateRecordingActions();
+        try
+        {
+            do
+            {
+                _archiveReloadPending = false;
+                var snapshot = await _controller.GetRecordingsAsync(_archiveReloadCancellation.Token);
+                if (IsDisposed || _exitInProgress) return;
+                _archiveCache = snapshot; RefreshRecordings(false);
+            } while (_archiveReloadPending);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { if (!IsDisposed) { _archiveLoadError = "Aktualisieren fehlgeschlagen: " + ex.Message; _footer.Text = _archiveLoadError; } }
+        finally { _archiveLoading = false; if (!IsDisposed) UpdateRecordingActions(); }
+    }
+    private void ResetArchiveFilters() { _search.Clear(); _archiveFilter.SelectedIndex = 0; _dateFilter.SelectedIndex = 0; RefreshRecordings(false); }
+    private void SortArchive(string column) { _archiveSortDescending = _archiveSortColumn == column ? !_archiveSortDescending : column is "Time" or "Size"; _archiveSortColumn = column; RefreshRecordings(false); }
+    private void AddArchiveMenuItem(string key, string text, string shortcut, EventHandler handler)
+    { var item = new ToolStripMenuItem(text, null, handler) { Name = key, ShortcutKeyDisplayString = shortcut }; _archiveMenu.Items.Add(item); }
     private RecordingInfo[] SelectedRecordings() => _recordings.SelectedRows.Cast<DataGridViewRow>().Select(r => r.Tag).OfType<RecordingInfo>().ToArray();
     private RecordingInfo? SelectedRecording() => SelectedRecordings() is { Length: 1 } items ? items[0] : null;
     private void UpdateRecordingActions()
     {
-        var items = SelectedRecordings(); var item = items.Length == 1 ? items[0] : null; bool available = !_uiBusy && !_controller.Status.Busy && !_exitInProgress && items.Length > 0;
+        var items = SelectedRecordings(); var item = items.Length == 1 ? items[0] : null; bool available = !_uiBusy && !_exporting && !_controller.Status.Busy && !_exitInProgress && items.Length > 0;
         _play.Enabled = available && item is { Active: false }; _export.Enabled = available && item is { Active: false }; _labelSelected.Enabled = available && item is not null; _protectSelected.Enabled = available && items.Any(i => !i.Protected); _releaseSelected.Enabled = available && items.Any(i => i.Protected); _delete.Enabled = available && items.Any(i => !i.Active); _search.Enabled = !_uiBusy; _archiveFilter.Enabled = !_uiBusy; _dateFilter.Enabled = !_uiBusy; _recordings.Enabled = !_uiBusy;
-        if (!_exporting) _archiveProgress.Text = _uiBusy ? "Auswahl wird bearbeitet …" : items.Length > 0 ? $"{items.Length} ausgewählt   ·   {FormatBytes(items.Sum(i => i.Bytes))}" : "Mehrere Abschnitte mit Strg oder Umschalt auswählen.";
+        foreach (var pair in new[] { ("Play", _play.Enabled), ("Reveal", available && item is not null), ("Export", _export.Enabled), ("Label", _labelSelected.Enabled), ("Protect", _protectSelected.Enabled), ("Release", _releaseSelected.Enabled), ("Delete", _delete.Enabled) }) if (_archiveMenu.Items[pair.Item1] is { } command) command.Enabled = pair.Item2;
+        if (!_exporting) _archiveProgress.Text = _uiBusy ? "Auswahl wird bearbeitet …" : _archiveLoading ? "Aufnahmen werden im Hintergrund aktualisiert …" : _archiveLoadError.Length > 0 ? _archiveLoadError : items.Length > 0 ? $"{items.Length} ausgewählt   ·   {FormatBytes(items.Sum(i => i.Bytes))}" : "Strg + F: Suchen   ·   F2: Benennen   ·   Strg + E: Exportieren";
     }
     private void PlaySelected() { if (SelectedRecording() is not { Active: false } item || _uiBusy) return; RunSync(() => Process.Start(new ProcessStartInfo(item.Path) { UseShellExecute = true })); }
     private void RevealSelected() { if (SelectedRecording() is not { } item || _uiBusy) return; RunSync(() => Process.Start(new ProcessStartInfo("explorer.exe") { UseShellExecute = true, Arguments = "/select,\"" + item.Path + "\"" })); }
@@ -248,8 +316,75 @@ public sealed class MainForm : Form
     }
     private async Task ExportSelectedAsync()
     {
-        if (SelectedRecording() is not { Active: false } item || _uiBusy) return; using var dialog = new SaveFileDialog { Title = "Aufnahme als MP4 exportieren", Filter = "MP4-Video (*.mp4)|*.mp4", DefaultExt = "mp4", AddExtension = true, FileName = Path.GetFileNameWithoutExtension(item.Path) + ".mp4", OverwritePrompt = true }; if (dialog.ShowDialog(this) != DialogResult.OK) return;
-        _exporting = true; _exportProgress.Visible = true; _archiveProgress.Text = _controller.Status.Recording ? "MP4 wird exportiert … Die Aufnahme läuft weiter." : "MP4 wird exportiert …"; try { await RunActionAsync(async () => { await _controller.ExportAsync(item.Path, dialog.FileName); _footer.Text = "MP4 exportiert: " + Path.GetFileName(dialog.FileName); }); } finally { _exporting = false; _exportProgress.Visible = false; UpdateRecordingActions(); }
+        if (SelectedRecording() is not { Active: false } item || _uiBusy || _exporting || _exitInProgress) return;
+        using var dialog = new SaveFileDialog { Title = "Aufnahme als MP4 exportieren", Filter = "MP4-Video (*.mp4)|*.mp4", DefaultExt = "mp4", AddExtension = true, FileName = Path.GetFileNameWithoutExtension(item.Path) + ".mp4", OverwritePrompt = false };
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+        if (File.Exists(dialog.FileName)) { ShowError(new IOException("Diese Datei existiert bereits. Wähle einen neuen Namen; vorhandene Exporte bleiben erhalten.")); return; }
+        _exportCancellation = new CancellationTokenSource(); _exporting = true; _exportProgress.Visible = _cancelExport.Visible = true;
+        _archiveProgressLayout.ColumnStyles[1].Width = 95; _archiveProgressLayout.ColumnStyles[2].Width = 96;
+        _archiveProgress.Text = "MP4-Export läuft · Aufnahmebedienung bleibt verfügbar."; UpdateRecordingActions();
+        try { _activeExportTask = _controller.ExportAsync(item.Path, dialog.FileName, _exportCancellation.Token); await _activeExportTask; if (!IsDisposed) _footer.Text = "MP4 exportiert: " + Path.GetFileName(dialog.FileName); }
+        catch (OperationCanceledException) { if (!IsDisposed) _footer.Text = "Export abgebrochen. Die Originalaufnahme bleibt erhalten."; }
+        catch (Exception ex) { if (!IsDisposed && !_exitInProgress) ShowError(ex); }
+        finally
+        {
+            _exporting = false; _activeExportTask = null; _exportCancellation.Dispose(); _exportCancellation = null;
+            if (!IsDisposed) { _exportProgress.Visible = _cancelExport.Visible = false; _archiveProgressLayout.ColumnStyles[1].Width = _archiveProgressLayout.ColumnStyles[2].Width = 0; RefreshDashboard(); }
+        }
+    }
+    private void CancelExport() { _exportCancellation?.Cancel(); _archiveProgress.Text = "Export wird abgebrochen …"; }
+    private async Task TestAudioAsync()
+    {
+        if (_audio.SelectedItem is not AudioSource source) return;
+        await RunActionAsync(async () =>
+        {
+            using var capture = await Task.Run(() => new AudioLoopback(source.Id));
+            capture.Start(); double peak = 0;
+            try
+            {
+                for (int i = 0; i < 40 && !_exitInProgress && !IsDisposed; i++)
+                {
+                    await Task.Delay(125); peak = Math.Max(peak, capture.PeakLevel);
+                    _audioTestResult.Text = $"Prüfe {capture.DeviceName} · Pegel {peak * 100:0} %";
+                }
+                if (!IsDisposed) { _audioTestResult.Text = peak > 0.0001 ? $"✓ Ton empfangen · {capture.DeviceName}" : "Kein Ton empfangen. Spiel starten oder die Spiel-/Headset-Ausgabe wählen."; _audioTestResult.ForeColor = peak > 0.0001 ? Cyan : Amber; }
+            }
+            finally { await capture.StopAsync(); }
+        });
+    }
+    private Task SaveSettingsAsync() => RunActionAsync(async () => { await _controller.SaveSettingsAsync(ReadSettings()); LoadSettings(); _footer.Text = "Einstellungen gespeichert."; });
+    private void TrackSettingsChanges()
+    {
+        foreach (var control in Descendants(_settingsFields))
+        {
+            if (control is TextBox entry) entry.TextChanged += (_, _) => UpdateDirtyState();
+            if (control is ComboBox choice) choice.SelectedIndexChanged += (_, _) => UpdateDirtyState();
+            if (control is CheckBox check) check.CheckedChanged += (_, _) => UpdateDirtyState();
+            if (control is NumericUpDown number) number.ValueChanged += (_, _) => UpdateDirtyState();
+        }
+    }
+    private static IEnumerable<Control> Descendants(Control parent) { foreach (Control child in parent.Controls) { yield return child; foreach (var nested in Descendants(child)) yield return nested; } }
+    private string SettingsFingerprint() => string.Join("\u001f", Descendants(_settingsFields).Where(c => c is TextBox or ComboBox or CheckBox or NumericUpDown).Select(c => c switch { CheckBox check => check.Checked.ToString(), NumericUpDown number => number.Value.ToString(System.Globalization.CultureInfo.InvariantCulture), ComboBox choice => choice.SelectedItem is DisplaySource display ? display.Id : choice.SelectedItem is AudioSource audio ? audio.Id : choice.SelectedIndex.ToString(), _ => c.Text }));
+    private void UpdateDirtyState() { if (_loadingSettings) return; _settingsDirty = SettingsFingerprint() != _settingsBaseline; RefreshDashboard(); }
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        if (keyData == (Keys.Control | Keys.S) && _page == 1 && _save.Enabled) { _ = SaveSettingsAsync(); return true; }
+        if (_page == 2)
+        {
+            if (keyData == (Keys.Control | Keys.F)) { _search.Focus(); _search.SelectAll(); return true; }
+            if (keyData == (Keys.Control | Keys.Shift | Keys.F)) { ResetArchiveFilters(); return true; }
+            if (keyData == Keys.F5) { RefreshRecordings(); return true; }
+            if (_recordings.ContainsFocus)
+            {
+                if (keyData == Keys.Enter && _play.Enabled) { PlaySelected(); return true; }
+                if (keyData == Keys.F2 && _labelSelected.Enabled) { _ = LabelSelectedAsync(); return true; }
+                if (keyData == Keys.Delete && _delete.Enabled) { _ = DeleteSelectedAsync(); return true; }
+                if (keyData == (Keys.Control | Keys.E) && _export.Enabled) { _ = ExportSelectedAsync(); return true; }
+                if (keyData == (Keys.Control | Keys.G) && _protectSelected.Enabled) { _ = ProtectSelectedAsync(true); return true; }
+                if (keyData == (Keys.Control | Keys.Shift | Keys.G) && _releaseSelected.Enabled) { _ = ProtectSelectedAsync(false); return true; }
+            }
+        }
+        return base.ProcessCmdKey(ref msg, keyData);
     }
     private async Task RunActionAsync(Func<Task> action) { if (_uiBusy || _exitInProgress) return; _uiBusy = true; RefreshDashboard(); try { await action(); } catch (Exception ex) { ShowError(ex); } finally { _uiBusy = false; if (!IsDisposed) { RefreshDashboard(); if (_page == 2) RefreshRecordings(); } } }
     private void RunSync(Action action) { try { action(); } catch (Exception ex) { ShowError(ex); } }
@@ -266,14 +401,14 @@ public sealed class MainForm : Form
     private async void HandleFormClosing(object? sender, FormClosingEventArgs e)
     {
         if (_allowClose) return; bool windowsClosing = e.CloseReason is CloseReason.WindowsShutDown or CloseReason.TaskManagerClosing;
-        if (!_exitRequested && !windowsClosing && (_controller.Status.Armed || _controller.Status.Recording || _controller.Status.Paused || _controller.Status.Busy || _uiBusy)) { e.Cancel = true; Hide(); if (!_hiddenNoticeShown) { _hiddenNoticeShown = true; Notify("Die Aufnahme bleibt aktiv. ScreenDash über das Symbol im Infobereich öffnen oder dort beenden."); } return; }
+        if (!_exitRequested && !windowsClosing && (_controller.Status.Armed || _controller.Status.Recording || _controller.Status.Paused || _controller.Status.Busy || _uiBusy || _exporting)) { e.Cancel = true; Hide(); if (!_hiddenNoticeShown) { _hiddenNoticeShown = true; Notify("Die Aufnahme bleibt aktiv. ScreenDash über das Symbol im Infobereich öffnen oder dort beenden."); } return; }
         e.Cancel = true; await ExitAsync();
     }
-    private async Task ExitAsync() { if (_exitInProgress || _allowClose) return; _exitRequested = true; _exitInProgress = true; RefreshDashboard(); try { await _controller.StopAsync(); _allowClose = true; _tray.Visible = false; Close(); } catch (Exception ex) { _exitRequested = false; _exitInProgress = false; ShowWindow(); ShowError(ex); } }
+    private async Task ExitAsync() { if (_exitInProgress || _allowClose) return; _exitRequested = true; _exitInProgress = true; RefreshDashboard(); try { _exportCancellation?.Cancel(); if (_activeExportTask is { } export) { try { await export; } catch (OperationCanceledException) { } catch { } } await _controller.StopAsync(); _allowClose = true; _tray.Visible = false; Close(); } catch (Exception ex) { _exitRequested = false; _exitInProgress = false; ShowWindow(); ShowError(ex); } }
     protected override void OnHandleCreated(EventArgs e) { base.OnHandleCreated(e); try { int dark = 1; DwmSetWindowAttribute(Handle, 20, ref dark, sizeof(int)); } catch (DllNotFoundException) { } catch (EntryPointNotFoundException) { } if (!_enableHotkeys) return; const uint modifiers = 0x0001 | 0x0002 | 0x4000; _hotkeyToggle = RegisterHotKey(Handle, 8, modifiers, (uint)Keys.F8); _hotkeyProtect = RegisterHotKey(Handle, 9, modifiers, (uint)Keys.F9); _hotkeyPause = RegisterHotKey(Handle, 10, modifiers, (uint)Keys.F10); if (!_hotkeyToggle || !_hotkeyProtect || !_hotkeyPause) _footer.Text = "Ein Tastenkürzel ist bereits belegt. Nutze die Schaltflächen oder das Menü im Infobereich."; }
     protected override void OnHandleDestroyed(EventArgs e) { if (_hotkeyToggle) UnregisterHotKey(Handle, 8); if (_hotkeyProtect) UnregisterHotKey(Handle, 9); if (_hotkeyPause) UnregisterHotKey(Handle, 10); _hotkeyToggle = _hotkeyProtect = _hotkeyPause = false; base.OnHandleDestroyed(e); }
     protected override void WndProc(ref Message m) { if (m.Msg == 0x0312) { int id = m.WParam.ToInt32(); if (id == 8) { _ = RunActionAsync(_controller.ToggleRecordingAsync); return; } if (id == 9) { _ = RunActionAsync(_controller.ProtectRecentAsync); return; } if (id == 10 && (_controller.Status.Armed || _controller.Status.Recording)) { _ = RunActionAsync(TogglePauseAsync); return; } } base.WndProc(ref m); }
-    protected override void Dispose(bool disposing) { if (disposing) { _controller.Changed -= ControllerChanged; _controller.Notice -= ControllerNotice; _tray.Visible = false; _tray.Dispose(); _trayMenu.Dispose(); _tips.Dispose(); } base.Dispose(disposing); }
+    protected override void Dispose(bool disposing) { if (disposing) { _controller.Changed -= ControllerChanged; _controller.Notice -= ControllerNotice; _archiveReloadCancellation.Cancel(); _exportCancellation?.Cancel(); _archiveMenu.Dispose(); _tray.Visible = false; _tray.Dispose(); _trayMenu.Dispose(); _tips.Dispose(); } base.Dispose(disposing); }
     [DllImport("user32.dll", SetLastError = true)] private static extern bool RegisterHotKey(IntPtr window, int id, uint modifiers, uint key);
     [DllImport("user32.dll", SetLastError = true)] private static extern bool UnregisterHotKey(IntPtr window, int id);
     [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);

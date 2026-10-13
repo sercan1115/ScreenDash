@@ -30,6 +30,12 @@ var tests = new (string Name, Action Run)[]
     ("read-only file blocks entire manual deletion batch", ManualDeleteReadOnly),
     ("manual deletion removes only matching owned sidecars", ManualDeleteSidecars),
     ("metadata junction is never followed or removed", MetadataJunction)
+    ,("unchanged notes are cached and external replacements refresh", LabelCache)
+    ,("missing notes and videos invalidate cached labels", LabelCacheRemoval)
+    ,("invalid notes recover after external changes and locks", InvalidLabelCache)
+    ,("missing recordings cannot create orphan protection markers", MissingProtection)
+    ,("hidden marker directories keep recordings protected", HiddenMarker)
+    ,("large manual batch preserves notes until all targets validate", LargeManualBatch)
 };
 var failures = 0;
 foreach (var test in tests)
@@ -341,7 +347,104 @@ static void LabelCorruption()
     store.SetLabel(path, "Repariert");
     Check(store.List().Single().Label == "Repariert", "A valid edit should recover from corrupt metadata.");
     using var open = new FileStream(note, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
-    Check(store.List().Single().Label == "", "A note opened exclusively by another program should be safely ignored.");
+    Check(Store(temp.Root).List().Single().Label == "", "An uncached note opened exclusively by another program should be safely ignored.");
+}
+
+static void LabelCache()
+{
+    using var temp = new Scratch();
+    var path = Segment(temp.Root, Now().AddHours(-1), Now());
+    var note = path + ".note.json";
+    var store = Store(temp.Root);
+    store.SetLabel(path, "Erste Notiz");
+    Check(store.List().Single().Label == "Erste Notiz", "First scan should read persisted metadata.");
+    using (var open = new FileStream(note, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        Check(store.List().Single().Label == "Erste Notiz", "An unchanged cached note should be displayed without opening the metadata again.");
+    var previousWrite = File.GetLastWriteTimeUtc(note);
+    Store(temp.Root).SetLabel(path, "Andere Notiz");
+    File.SetLastWriteTimeUtc(note, previousWrite.AddSeconds(1));
+    Check(store.List().Single().Label == "Andere Notiz", "A label changed by another store must replace the cache.");
+    store.SetLabel(path, "Eigene Änderung");
+    Check(store.List().Single().Label == "Eigene Änderung", "An edit by this store must immediately invalidate its cache.");
+}
+
+static void LabelCacheRemoval()
+{
+    using var temp = new Scratch();
+    var path = Segment(temp.Root, Now().AddHours(-1), Now());
+    var note = path + ".note.json";
+    var store = Store(temp.Root);
+    store.SetLabel(path, "Alt");
+    Check(store.List().Single().Label == "Alt", "The initial note should be cached.");
+    File.Delete(note);
+    Check(store.List().Single().Label == "", "A removed note must not leave stale display text.");
+    store.SetLabel(path, "Wieder da");
+    Check(store.List().Single().Label == "Wieder da", "A recreated note should be loaded normally.");
+    File.Delete(path);
+    Check(store.List().Count == 0, "A removed video must not remain in the archive snapshot.");
+    File.Delete(note);
+    Segment(temp.Root, Now().AddHours(-1), Now());
+    Check(store.List().Single().Label == "", "Reusing a removed recording name must not restore its former label.");
+}
+
+static void InvalidLabelCache()
+{
+    using var temp = new Scratch();
+    var path = Segment(temp.Root, Now().AddHours(-1), Now());
+    var note = path + ".note.json";
+    var store = Store(temp.Root);
+    File.WriteAllText(note, "{broken");
+    Check(store.List().Single().Label == "", "Invalid JSON should have an empty label.");
+    var stamp = File.GetLastWriteTimeUtc(note);
+    File.WriteAllText(note, "{\"Label\":\"Neu\"}");
+    File.SetLastWriteTimeUtc(note, stamp.AddSeconds(1));
+    using (var open = new FileStream(note, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        Check(store.List().Single().Label == "", "A changed but locked note must not return a prior cached value.");
+    Check(store.List().Single().Label == "Neu", "Transient lock failures must recover even when metadata timestamps stay unchanged.");
+    File.WriteAllText(note, "{\"Label\":\"bad\\nlabel\"}");
+    File.SetLastWriteTimeUtc(note, stamp.AddSeconds(2));
+    Check(store.List().Single().Label == "", "A valid cached note replaced by invalid text must be dropped.");
+}
+
+static void MissingProtection()
+{
+    using var temp = new Scratch();
+    var path = Path.Combine(temp.Root, Prefix(Now()) + "_000000.mkv");
+    var store = Store(temp.Root);
+    Throws<FileNotFoundException>(() => store.SetProtected(path, true));
+    Throws<FileNotFoundException>(() => store.SetProtected(path, false));
+    Check(!File.Exists(path + ".keep"), "A missing recording must never create an orphan protection marker.");
+}
+
+static void HiddenMarker()
+{
+    using var temp = new Scratch();
+    var path = Segment(temp.Root, Now().AddDays(-10), Now().AddDays(-9));
+    var marker = path + ".keep";
+    Directory.CreateDirectory(marker);
+    File.SetAttributes(marker, File.GetAttributes(marker) | FileAttributes.Hidden | FileAttributes.System);
+    try
+    {
+        var store = Store(temp.Root);
+        Check(store.List().Single().Protected, "Hidden/system marker directories must remain fail-safe protection indicators.");
+        Check(store.Cleanup(Settings(temp.Root), nowUtc: Now()).DeletedCount == 0 && File.Exists(path), "Retention must preserve files with any marker, including a hidden directory.");
+    }
+    finally { File.SetAttributes(marker, FileAttributes.Directory); }
+}
+
+static void LargeManualBatch()
+{
+    using var temp = new Scratch();
+    var store = Store(temp.Root);
+    var paths = Enumerable.Range(0, 160).Select(i => Segment(temp.Root, Now().AddHours(-2), Now().AddHours(-1), i)).ToArray();
+    foreach (var path in paths) store.SetLabel(path, "Auswahl");
+    var marked = paths[^1];
+    store.SetProtected(marked, true);
+    Throws<IOException>(() => store.Delete(paths, false));
+    Check(paths.All(File.Exists) && paths.All(p => File.Exists(p + ".note.json")), "A protected final target must preserve every recording and note in a large batch.");
+    store.SetProtected(marked, false);
+    Check(store.Delete(paths, false) == paths.Length, "The entire validated batch should be deleted after the protection is removed.");
+    Check(paths.All(p => !File.Exists(p) && !File.Exists(p + ".note.json")), "Successful batch deletion should remove each recording's owned note.");
 }
 
 static void CleanupSidecars()

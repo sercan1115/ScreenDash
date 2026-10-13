@@ -7,6 +7,7 @@ public sealed class AppSettings
     public int MaxStorageGb { get; set; } = 50;
     public int MinFreeSpaceGb { get; set; } = 2;
     public int SegmentMinutes { get; set; } = 5;
+    public bool SingleFile { get; set; } = true;
     public int Fps { get; set; } = 15;
     public int VideoBitrateKbps { get; set; } = 3000;
     public string EncoderMode { get; set; } = "Auto";
@@ -37,8 +38,8 @@ public sealed record RecordingInfo(string Path, DateTime StartedUtc, long Bytes,
     public string FileName => System.IO.Path.GetFileName(Path);
 }
 public sealed record CleanupResult(int DeletedCount, long DeletedBytes, long TotalBytes, long ProtectedBytes, long FreeBytes, bool CanRecord, string Message);
-public sealed record RecorderStatus(bool Recording, string Encoder, string Message, double Fps, long Frames, DateTime? StartedUtc);
-public sealed record DashboardStatus(bool Recording, bool Busy, string Message, string Encoder, TimeSpan Elapsed, double CpuPercent, long MemoryBytes, double Fps, CleanupResult? Storage, bool Armed = false, bool Paused = false, string PauseReason = "");
+public sealed record RecorderStatus(bool Recording, string Encoder, string Message, double Fps, long Frames, DateTime? StartedUtc, double AudioPeak = 0, string AudioDevice = "");
+public sealed record DashboardStatus(bool Recording, bool Busy, string Message, string Encoder, TimeSpan Elapsed, double CpuPercent, long MemoryBytes, double Fps, CleanupResult? Storage, bool Armed = false, bool Paused = false, string PauseReason = "", double AudioPeak = 0, string AudioDevice = "");
 
 public interface IAppController : IDisposable
 {
@@ -56,11 +57,12 @@ public interface IAppController : IDisposable
     Task RefreshDevicesAsync();
     Task ProtectRecentAsync();
     IReadOnlyList<RecordingInfo> GetRecordings();
+    Task<IReadOnlyList<RecordingInfo>> GetRecordingsAsync(CancellationToken cancellationToken = default);
     Task SetProtectedAsync(string path, bool protect);
     Task SetProtectedManyAsync(IReadOnlyList<string> paths, bool protect);
     Task SetLabelAsync(string path, string label);
     Task<int> DeleteRecordingsAsync(IReadOnlyList<string> paths, bool allowProtected = false);
-    Task ExportAsync(string path, string destination);
+    Task ExportAsync(string path, string destination, CancellationToken cancellationToken = default);
     void OpenRecordingFolder();
     void OpenLogs();
 }

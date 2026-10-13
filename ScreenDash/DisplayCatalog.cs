@@ -7,6 +7,14 @@ public static class DisplayCatalog
 {
     private const int DxgiNotFound = unchecked((int)0x887A0002);
 
+    internal static void ValidateSelection(DisplaySource selected, IReadOnlyList<DisplaySource> current)
+    {
+        var matching = current.FirstOrDefault(d => string.Equals(d.Id, selected.Id, StringComparison.Ordinal));
+        if (matching is null || matching.AdapterIndex != selected.AdapterIndex || matching.OutputIndex != selected.OutputIndex
+            || matching.Width != selected.Width || matching.Height != selected.Height || matching.X != selected.X || matching.Y != selected.Y)
+            throw new IOException("Der ausgewählte Bildschirm wurde während des Starts getrennt oder geändert. Bitte Geräte aktualisieren und die Aufnahme erneut starten.");
+    }
+
     public static IReadOnlyList<DisplaySource> GetDisplays()
     {
         var result = new List<DisplaySource>();

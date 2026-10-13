@@ -22,16 +22,20 @@ public sealed class AudioLoopback : IDisposable
     private int _stopping;
     private int _faulted;
     private int _disposed;
+    private float _peak;
+    private long _lastAudioPacket;
 
     public event Action<Exception>? Faulted;
     public int SampleRate => _capture.WaveFormat.SampleRate;
     public int Channels => _capture.WaveFormat.Channels;
     public string RawFormat { get; }
     public string PipePath { get; }
+    public string DeviceName => _device.FriendlyName;
+    public double PeakLevel => Stopwatch.GetElapsedTime(Interlocked.Read(ref _lastAudioPacket)).TotalSeconds < 1 ? _peak : 0;
 
     public static IReadOnlyList<AudioSource> GetDevices()
     {
-        var result = new List<AudioSource> { new("", "Windows-Standardausgabe") };
+        var result = new List<AudioSource> { new("", "Automatisch · aktive Audioausgabe"), new("@windows-default", "Windows-Standardausgabe") };
         using var enumerator = new MMDeviceEnumerator();
         foreach (var device in enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active))
         {
@@ -44,7 +48,8 @@ public sealed class AudioLoopback : IDisposable
     {
         using var enumerator = new MMDeviceEnumerator();
         _device = string.IsNullOrEmpty(deviceId)
-            ? enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia)
+            ? ResolveAutomaticDevice(enumerator)
+            : deviceId == "@windows-default" ? enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia)
             : enumerator.GetDevice(deviceId);
         if (_device.DataFlow != DataFlow.Render || _device.State != DeviceState.Active)
         {
@@ -88,6 +93,24 @@ public sealed class AudioLoopback : IDisposable
     private void OnData(object? sender, WaveInEventArgs e)
     {
         if (_stopping != 0 || e.BytesRecorded == 0) return;
+        float peak = 0;
+        int sampleBytes = _capture.WaveFormat.BitsPerSample / 8;
+        // At most 128 samples per callback: enough for feedback without an audio visualization pipeline.
+        int step = Math.Max(1, e.BytesRecorded / Math.Max(1, sampleBytes) / 128) * sampleBytes;
+        for (int offset = 0; offset + sampleBytes <= e.BytesRecorded; offset += step)
+        {
+            float value = RawFormat switch
+            {
+                "f32le" => Math.Abs(BitConverter.ToSingle(e.Buffer, offset)),
+                "s16le" => Math.Abs(BitConverter.ToInt16(e.Buffer, offset) / 32768f),
+                "s32le" => Math.Abs(BitConverter.ToInt32(e.Buffer, offset) / 2147483648f),
+                "s24le" => Math.Abs(((e.Buffer[offset] | e.Buffer[offset + 1] << 8 | e.Buffer[offset + 2] << 16) << 8) / 2147483648f),
+                _ => 0
+            };
+            if (float.IsFinite(value)) peak = Math.Max(peak, value);
+        }
+        _peak = Math.Clamp(peak, 0, 1);
+        Interlocked.Exchange(ref _lastAudioPacket, Stopwatch.GetTimestamp());
         var align = _capture.WaveFormat.BlockAlign;
         var frames = e.BytesRecorded / align;
         var end = (long)(_clock.Elapsed.TotalSeconds * SampleRate);
@@ -210,6 +233,27 @@ public sealed class AudioLoopback : IDisposable
                 _ => throw new InvalidOperationException("Nicht unterstützte PCM-Bittiefe des Audioausgabegerätes.")
             };
         throw new InvalidOperationException("Nicht unterstütztes Audioformat des Ausgabegerätes.");
+    }
+
+    private static MMDevice ResolveAutomaticDevice(MMDeviceEnumerator enumerator)
+    {
+        // Games can use a headset while Windows' multimedia default still points at HDMI.
+        // Choose an endpoint with actual playback; when all are silent use the normal default.
+        string? activeId = null;
+        float highestPeak = 0.0001f;
+        foreach (var endpoint in enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active))
+        {
+            using (endpoint)
+            {
+                try
+                {
+                    float peak = endpoint.AudioMeterInformation.MasterPeakValue;
+                    if (peak > highestPeak) { highestPeak = peak; activeId = endpoint.ID; }
+                }
+                catch (System.Runtime.InteropServices.COMException) { }
+            }
+        }
+        return activeId is null ? enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia) : enumerator.GetDevice(activeId);
     }
 
     public void Dispose()

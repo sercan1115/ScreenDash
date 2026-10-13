@@ -1,8 +1,8 @@
 # ScreenDash
 
-Eine lokale Bildschirm-Dashcam für **Windows 10/11 (64 Bit)**. ScreenDash zeichnet einen ausgewählten Monitor mit Systemton auf, speichert fortlaufende Abschnitte und räumt alte Aufnahmen automatisch auf.
+Eine lokale Bildschirm-Dashcam für **Windows 10/11 (64 Bit)**. ScreenDash zeichnet einen ausgewählten Monitor mit Systemton auf, speichert eine durchgehende Datei je Aufnahme und räumt alte Aufnahmen automatisch auf.
 
-**[Windows-Version herunterladen](https://github.com/sercan1115/ScreenDash/releases/latest)** · [Anleitung](README.de.md) · [Neuerungen in 1.1](NEU-IN-1.1.de.md)
+**[Windows-Version herunterladen](https://github.com/sercan1115/ScreenDash/releases/latest)** · [Anleitung](README.de.md) · [Neuerungen in 1.2](NEU-IN-1.2.de.md)
 
 ![ScreenDash – Aufnahmeübersicht mit Beispieldaten](docs/screenshots/dashboard.png)
 
@@ -10,11 +10,15 @@ Die Bilder zeigen die Oberfläche mit Beispieldaten. Ihre Auslastungsanzeigen si
 
 ## Funktionen
 
+- **Eine Datei:** kein Wechsel nach einer Minute; optionale Segmentierung bleibt verfügbar. Pause oder Stoppen schließt die laufende Datei.
+- **Flüssiges Archiv:** Hintergrundladen, stabile Zeilen und Auswahl, echte Größen-/Zeitsortierung und neue Tastenkürzel.
+- **Tonwerkzeuge:** aktive Ausgabe automatisch wählen, Tonpegel anzeigen, fünf Sekunden testen und den Windows-Mixer öffnen.
+
 - **Automatische Aufbewahrung:** standardmäßig sieben Tage, mit einstellbarem Speicherlimit und freier Mindestreserve. Bei knappem Speicher werden ältere ungeschützte Aufnahmen schon früher gelöscht.
-- **Wichtige Momente sichern:** die letzten zehn Minuten einschließlich des laufenden Abschnitts vor automatischem Löschen schützen.
+- **Wichtige Momente sichern:** Aufnahmen aus den letzten zehn Minuten einschließlich der gesamten laufenden Datei vor automatischem Löschen schützen.
 - **Archiv:** suchen, nach Zeitraum und Schutz filtern, Bezeichnungen vergeben und mehrere Aufnahmen gemeinsam verwalten.
 - **Pause und Fortsetzen:** der Encoder stoppt während der Pause; Fortsetzen beginnt einen neuen Abschnitt. PC-Sperre und Standby werden berücksichtigt.
-- **MP4-Export:** abgeschlossene MKV-Aufnahmen ohne Neukodierung exportieren. Das Original bleibt erhalten.
+- **MP4-Export:** abgeschlossene MKV-Aufnahmen ohne Neukodierung exportieren. Das Original bleibt erhalten; Export ist abbrechbar und Aufnahmebuttons bleiben verfügbar.
 - **Tray und Tastenkürzel:** im Hintergrund bedienen; Windows-Autostart und Aufnahme beim Programmstart sind optional.
 - **Lokale Speicherung:** Videos, Einstellungen und Protokolle bleiben auf dem PC. Die App lädt keine Aufnahmen hoch.
 
@@ -57,7 +61,7 @@ cd ScreenDash
 .\build.ps1
 ```
 
-Das Skript führt die 24 Speicher-/Einstellungstests und 20 Zustands-/Planungstests aus und baut die portable App nach `dist`. GitHub Actions führt dieselben Tests auf Windows aus und erzeugt ein Build-Artefakt. Die geprüfte Windows-Version steht in den Releases.
+Das Skript führt 30 Speicher-/Einstellungstests, 22 Zustands-/Planungs-/Zeitprüfungen und 17 Prozess-/Exportprüfungen ohne Aufnahme aus und baut die portable App nach `dist`. GitHub Actions führt dieselben Tests auf Windows aus und erzeugt ein Build-Artefakt. Die geprüfte Windows-Version steht in den Releases.
 
 Zusätzliche Integrationstests benötigen einen interaktiven Windows-Desktop, einen Monitor, FFmpeg und gegebenenfalls ein Audiogerät. Sie zeichnen echte Bildschirminhalte auf und sind daher kein Bestandteil des CI-Laufs. Hinweise und Ergebnisse: [Testbericht](TESTBERICHT.de.md).
 

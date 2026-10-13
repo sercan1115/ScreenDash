@@ -10,6 +10,7 @@ public sealed class AppController : IAppController
     private readonly CancellationTokenSource _lifetime = new();
     private readonly Task _ticker;
     private readonly RecordingSessionState _session = new();
+    private readonly RecordingClock _recordingClock = new();
     private RecordingStore _store;
     private AppSettings _settings;
     private IReadOnlyList<DisplaySource> _displays;
@@ -19,8 +20,6 @@ public sealed class AppController : IAppController
     private string _message = "Bereit für die erste Aufnahme";
     private bool _busy, _locked, _suspended, _disposed;
     private long _recoveringGeneration = -1;
-    private DateTime? _started;
-    private TimeSpan _completedElapsed;
     private double _cpu;
     private long _memory;
     private TimeSpan _previousSelfCpu, _previousChildCpu;
@@ -32,8 +31,8 @@ public sealed class AppController : IAppController
     public IReadOnlyList<DisplaySource> Displays => _displays;
     public IReadOnlyList<AudioSource> AudioDevices => _audioDevices;
     public DashboardStatus Status => new(_recordStatus.Recording, _busy, _message, _recordStatus.Encoder,
-        _session.Armed ? _completedElapsed + (_started.HasValue && _recordStatus.Recording ? TimeSpan.FromTicks(Math.Max(0, (DateTime.UtcNow - _started.Value).Ticks)) : TimeSpan.Zero) : TimeSpan.Zero,
-        _cpu, _memory, _recordStatus.Fps, _storage, _session.Armed, _session.Paused, _session.PauseReason);
+        _session.Armed ? _recordingClock.Elapsed : TimeSpan.Zero,
+        _cpu, _memory, _recordStatus.Fps, _storage, _session.Armed, _session.Paused, _session.PauseReason, _recordStatus.AudioPeak, _recordStatus.AudioDevice);
     public event Action? Changed;
     public event Action<string>? Notice;
 
@@ -74,7 +73,7 @@ public sealed class AppController : IAppController
             else
             {
                 _session.Start();
-                _completedElapsed = TimeSpan.Zero;
+                _recordingClock.Reset();
                 try { await StartCoreAsync(); }
                 catch { _session.Stop(); throw; }
             }
@@ -133,7 +132,6 @@ public sealed class AppController : IAppController
             await _recorder.StartAsync(_settings.Clone(), display, _sessionPrefix, _lifetime.Token);
             if (!_recorder.Status.Recording) throw new IOException("Die Aufnahme wurde bereits beim Start unterbrochen. Prüfe das Protokoll und die Geräte.");
             startupCompleted = true;
-            _started = _recorder.Status.StartedUtc ?? DateTime.UtcNow;
             _message = "Aufnahme läuft · " + display.Name;
             AppLog.Write("Aufnahme gestartet: " + _sessionPrefix + " / " + _recorder.Status.Encoder);
         }
@@ -154,7 +152,7 @@ public sealed class AppController : IAppController
     private async Task StopCoreAsync(string message)
     {
         _busy = true; Publish();
-        try { await _recorder.StopAsync(); _sessionPrefix = null; _started = null; _message = message; }
+        try { await _recorder.StopAsync(); _sessionPrefix = null; _recordingClock.End(); _message = message; }
         finally { _busy = false; Publish(); }
     }
 
@@ -166,14 +164,14 @@ public sealed class AppController : IAppController
         {
             if (_session.Armed || _recordStatus.Recording || _busy) throw new InvalidOperationException("Stoppe die Aufnahme, bevor du Einstellungen änderst.");
             // Validate folder access before touching settings/startup; commit the live pair together.
-            var candidateStore = new RecordingStore(validated.RecordingDirectory);
+            var candidateStore = await Task.Run(() => new RecordingStore(validated.RecordingDirectory));
             using var startupKey = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true);
             var previousStartup = startupKey.GetValue("ScreenDash", null, RegistryValueOptions.DoNotExpandEnvironmentNames);
             var previousKind = previousStartup is null ? RegistryValueKind.String : startupKey.GetValueKind("ScreenDash");
             try
             {
                 SetWindowsStartup(validated.StartWithWindows);
-                SettingsStore.Save(validated);
+                await Task.Run(() => SettingsStore.Save(validated));
             }
             catch
             {
@@ -188,7 +186,7 @@ public sealed class AppController : IAppController
             _store = candidateStore;
             _settings = validated;
             _session.SetPrivacy(_locked, _suspended, validated.PauseOnLock);
-            _storage = _store.Cleanup(validated);
+            _storage = await Task.Run(() => _store.Cleanup(validated));
             _message = "Einstellungen gespeichert";
         }
         finally { _gate.Release(); Publish(); }
@@ -214,7 +212,7 @@ public sealed class AppController : IAppController
         try
         {
             int count = await Task.Run(() => _store.ProtectRecent(_settings.ProtectMinutes, _sessionPrefix));
-            _storage = _store.Cleanup(_settings, _sessionPrefix);
+            _storage = await Task.Run(() => _store.Cleanup(_settings, _sessionPrefix));
             _message = count > 0 ? $"{count} Videodatei(en) vor automatischem Löschen geschützt" : "Keine Aufnahmen im gewählten Zeitraum vorhanden";
             ShowNotice(_message);
         }
@@ -222,6 +220,13 @@ public sealed class AppController : IAppController
     }
 
     public IReadOnlyList<RecordingInfo> GetRecordings() => _store.List(_sessionPrefix);
+    public async Task<IReadOnlyList<RecordingInfo>> GetRecordingsAsync(CancellationToken cancellationToken = default)
+    {
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
+        await _gate.WaitAsync(linked.Token);
+        try { return await Task.Run(() => _store.List(_sessionPrefix), linked.Token); }
+        finally { _gate.Release(); }
+    }
     public async Task SetProtectedAsync(string path, bool protect)
         => await SetProtectedManyAsync([path], protect);
     public async Task SetProtectedManyAsync(IReadOnlyList<string> paths, bool protect)
@@ -230,7 +235,7 @@ public sealed class AppController : IAppController
         try
         {
             await Task.Run(() => { foreach (var path in paths.Distinct(StringComparer.OrdinalIgnoreCase)) _store.SetProtected(path, protect); });
-            _storage = _store.Cleanup(_settings, _sessionPrefix);
+            _storage = await Task.Run(() => _store.Cleanup(_settings, _sessionPrefix));
         }
         finally { _gate.Release(); Publish(); }
     }
@@ -246,27 +251,29 @@ public sealed class AppController : IAppController
         try
         {
             int count = await Task.Run(() => _store.Delete(paths, allowProtected, _sessionPrefix));
-            _storage = _store.Cleanup(_settings, _sessionPrefix);
+            _storage = await Task.Run(() => _store.Cleanup(_settings, _sessionPrefix));
             _message = $"{count} Aufnahme(n) gelöscht";
             return count;
         }
         finally { _gate.Release(); Publish(); }
     }
-    public async Task ExportAsync(string path, string destination)
+    public async Task ExportAsync(string path, string destination, CancellationToken cancellationToken = default)
     {
         // A read lease prevents deletion while exporting without changing the user's protection setting.
-        await _gate.WaitAsync();
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
+        await _gate.WaitAsync(linked.Token);
         FileStream readLease;
         try
         {
-            var info = _store.List(_sessionPrefix).FirstOrDefault(f => string.Equals(f.Path, path, StringComparison.OrdinalIgnoreCase))
+            var info = (await Task.Run(() => _store.List(_sessionPrefix), linked.Token)).FirstOrDefault(f => string.Equals(f.Path, path, StringComparison.OrdinalIgnoreCase))
                 ?? throw new InvalidOperationException("Die Aufnahme ist nicht mehr vorhanden.");
             if (info.Active) throw new InvalidOperationException("Die aktuelle Videodatei kann nach dem Segmentwechsel oder Stoppen exportiert werden.");
+            linked.Token.ThrowIfCancellationRequested();
             readLease = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
         }
         finally { _gate.Release(); }
-        using (readLease) await Recorder.ExportAsync(path, destination, _lifetime.Token);
-        Publish();
+        try { using (readLease) await Recorder.ExportAsync(path, destination, linked.Token); }
+        finally { Publish(); }
     }
     public void OpenRecordingFolder()
     {
@@ -283,11 +290,11 @@ public sealed class AppController : IAppController
     {
         bool wasRecording = _recordStatus.Recording;
         _recordStatus = status;
+        if (status.Recording && !wasRecording) _recordingClock.Begin();
         if (!status.Recording && wasRecording)
         {
             _sessionPrefix = null;
-            if (_started is DateTime started) _completedElapsed += TimeSpan.FromTicks(Math.Max(0, (DateTime.UtcNow - started).Ticks));
-            _started = null;
+            _recordingClock.End();
         }
         if (!status.Recording && wasRecording && _session.CanCapture && !_busy && !_disposed)
         {

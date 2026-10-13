@@ -21,7 +21,8 @@ public sealed class RecordingStore
     private readonly Func<string, long> _availableFreeBytes;
     private const int MaximumNoteBytes = 4096;
     private static readonly JsonSerializerOptions NoteOptions = new() { MaxDepth = 8 };
-    private readonly Dictionary<string, (long Bytes, DateTime ChangedUtc)> _invalidNotes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, NoteFingerprint> _invalidNotes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, CachedNote> _notes = new(StringComparer.OrdinalIgnoreCase);
 
     public RecordingStore(string root) : this(root, GetAvailableFreeBytes) { }
 
@@ -164,6 +165,7 @@ public sealed class RecordingStore
             {
                 if (File.Exists(note)) DeleteSafeSidecar(note);
                 _invalidNotes.Remove(note);
+                _notes.Remove(note);
                 return;
             }
             var temporary = Path.Combine(_root, ".screendash-note-" + Guid.NewGuid().ToString("N") + ".tmp");
@@ -179,6 +181,7 @@ public sealed class RecordingStore
                     throw new IOException("Die Beschriftungsdatei wurde durch eine Verknüpfung oder einen Ordner ersetzt.");
                 File.Move(temporary, note, true);
                 _invalidNotes.Remove(note);
+                _notes.Remove(note);
             }
             finally
             {
@@ -221,10 +224,11 @@ public sealed class RecordingStore
                 EnsureSafeRoot();
                 var refreshed = Scan(activeSessionPrefix);
                 if (refreshed.HadErrors) throw new IOException("Die Aufnahmen konnten nicht sicher geprüft werden. Es wurde nichts gelöscht.");
+                var refreshedEntries = refreshed.Entries.ToDictionary(e => e.Path, StringComparer.OrdinalIgnoreCase);
                 foreach (var item in pending)
                 {
-                    var current = refreshed.Entries.FirstOrDefault(e => StringComparer.OrdinalIgnoreCase.Equals(e.Path, item.Entry.Path))
-                        ?? throw new IOException("Eine ausgewählte Aufnahme wurde geändert. Es wurde nichts gelöscht.");
+                    if (!refreshedEntries.TryGetValue(item.Entry.Path, out var current))
+                        throw new IOException("Eine ausgewählte Aufnahme wurde geändert. Es wurde nichts gelöscht.");
                     AssertDeletable(current, allowProtected);
                     if (!Matches(current, GetHandleInformation(item.Handle)))
                         throw new IOException("Eine ausgewählte Aufnahme wurde geändert. Es wurde nichts gelöscht.");
@@ -283,8 +287,9 @@ public sealed class RecordingStore
     private void SetProtectedCore(string path, bool protect)
     {
         path = ValidateOwnedPath(path);
-        if (TryGetAttributes(path, out var fileAttributes) &&
-            (fileAttributes & (FileAttributes.ReparsePoint | FileAttributes.Directory)) != 0)
+        if (!TryGetAttributes(path, out var fileAttributes))
+            throw new FileNotFoundException("Die Aufnahme ist nicht mehr vorhanden.", path);
+        if ((fileAttributes & (FileAttributes.ReparsePoint | FileAttributes.Directory)) != 0)
             throw new IOException("Verknüpfungen und Ordner können nicht als Aufnahme geschützt werden.");
         var marker = path + ".keep";
         if (TryGetAttributes(marker, out var markerAttributes) &&
@@ -338,23 +343,43 @@ public sealed class RecordingStore
         var entries = new List<Entry>();
         var hadErrors = false;
         var prefix = NormalizeActivePrefix(activePrefix);
-        foreach (var path in Directory.EnumerateFiles(_root, "*", SearchOption.TopDirectoryOnly))
+        var videos = new List<(FileInfo Info, DateTime Started, string SessionPrefix)>();
+        var markers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var notes = new Dictionary<string, FileSystemInfo>(StringComparer.OrdinalIgnoreCase);
+        // Windows supplies attributes, length and timestamps with the directory enumeration.
+        // Keep that snapshot instead of issuing Refresh plus sidecar stat calls for every video.
+        // Destructive operations still revalidate each exact file and its protection marker.
+        foreach (var info in new DirectoryInfo(_root).EnumerateFileSystemInfos("*", new EnumerationOptions
         {
-            var name = Path.GetFileName(path);
-            if (!TryParseName(name, out var started, out var sessionPrefix)) continue;
+            RecurseSubdirectories = false, AttributesToSkip = 0, IgnoreInaccessible = false
+        }))
+        {
+            if (info.Name.EndsWith(".keep", StringComparison.OrdinalIgnoreCase)) markers.Add(info.FullName);
+            if (loadLabels && info.Name.EndsWith(".note.json", StringComparison.OrdinalIgnoreCase)) notes[info.FullName] = info;
+            if (info is FileInfo file && TryParseName(info.Name, out var started, out var sessionPrefix))
+                videos.Add((file, started, sessionPrefix));
+        }
+        if (loadLabels)
+        {
+            // Entries for removed videos/notes must not accumulate across days of loop recording.
+            var videoNotes = videos.Select(v => v.Info.FullName + ".note.json").ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var key in _notes.Keys.Where(k => !notes.ContainsKey(k) || !videoNotes.Contains(k)).ToArray()) _notes.Remove(key);
+            foreach (var key in _invalidNotes.Keys.Where(k => !notes.ContainsKey(k) || !videoNotes.Contains(k)).ToArray()) _invalidNotes.Remove(key);
+        }
+        foreach (var (info, started, sessionPrefix) in videos)
+        {
             try
             {
-                var info = new FileInfo(path);
-                info.Refresh();
                 if (!info.Exists || (info.Attributes & (FileAttributes.ReparsePoint | FileAttributes.Directory)) != 0) continue;
+                var path = info.FullName;
                 var lastWrite = info.LastWriteTimeUtc;
                 var completion = lastWrite.Year >= 1980 ? lastWrite : started;
                 // Each FFmpeg segment is created when its interval starts. Bound the birth
                 // timestamp because copied files may have a newer creation date.
                 var created = info.CreationTimeUtc;
                 var segmentStart = created >= started && created <= completion ? created : started;
-                entries.Add(new Entry(path, segmentStart, completion, lastWrite, created, info.Length, IsProtected(path), false, sessionPrefix,
-                    loadLabels ? ReadLabel(path) : ""));
+                entries.Add(new Entry(path, segmentStart, completion, lastWrite, created, info.Length, markers.Contains(path + ".keep"), false, sessionPrefix,
+                    loadLabels ? ReadLabel(path, notes.GetValueOrDefault(path + ".note.json")) : ""));
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
@@ -375,18 +400,21 @@ public sealed class RecordingStore
         return new(entries, hadErrors);
     }
 
-    private string ReadLabel(string videoPath)
+    private string ReadLabel(string videoPath, FileSystemInfo? noteInfo)
     {
         var note = videoPath + ".note.json";
-        var fingerprint = (Bytes: -1L, ChangedUtc: DateTime.MinValue);
+        var fingerprint = new NoteFingerprint(-1, DateTime.MinValue, DateTime.MinValue, default);
         try
         {
-            if (!TryGetAttributes(note, out var attributes)) { _invalidNotes.Remove(note); return ""; }
+            if (noteInfo is null) { _invalidNotes.Remove(note); _notes.Remove(note); return ""; }
+            var attributes = noteInfo.Attributes;
             if ((attributes & (FileAttributes.ReparsePoint | FileAttributes.Directory)) != 0)
                 throw new IOException("Die Beschriftungsdatei ist eine Verknüpfung oder ein Ordner.");
-            var info = new FileInfo(note);
-            info.Refresh();
-            fingerprint = (info.Length, info.LastWriteTimeUtc);
+            var info = (FileInfo)noteInfo;
+            fingerprint = new(info.Length, info.LastWriteTimeUtc, info.CreationTimeUtc, attributes);
+            // Only display metadata is cached. Protection and every deletion remain independent.
+            // Changes by another store/program invalidate the cached label through this snapshot.
+            if (_notes.TryGetValue(note, out var cached) && cached.Fingerprint == fingerprint) return cached.Label;
             if (info.Length > MaximumNoteBytes) throw new JsonException("Die Beschriftungsdatei ist zu groß.");
             using var handle = OpenSafeFile(note, Native.GenericRead, Native.ShareRead);
             using var stream = new FileStream(handle, FileAccess.Read);
@@ -403,6 +431,7 @@ public sealed class RecordingStore
                 ?? throw new JsonException("Die Beschriftungsdatei ist leer.");
             var label = ValidateLabel(metadata.Label);
             _invalidNotes.Remove(note);
+            _notes[note] = new(fingerprint, label);
             return label;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or ArgumentException)
@@ -412,6 +441,10 @@ public sealed class RecordingStore
                 AppLog.Write("Beschriftung ignoriert: " + Path.GetFileName(note) + " – " + ex.Message);
                 _invalidNotes[note] = fingerprint;
             }
+            // I/O failures can recover without a changed timestamp (for example an editor lock).
+            // Cache only invalid contents, not failures to access the file.
+            if (ex is JsonException or ArgumentException) _notes[note] = new(fingerprint, "");
+            else _notes.Remove(note);
             return "";
         }
     }
@@ -434,6 +467,7 @@ public sealed class RecordingStore
                 }
                 DeleteSafeSidecar(sidecar);
                 _invalidNotes.Remove(sidecar);
+                _notes.Remove(sidecar);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { AppLog.Write(ex); }
         }
@@ -554,6 +588,8 @@ public sealed class RecordingStore
     private sealed record Entry(string Path, DateTime StartedUtc, DateTime CompletedUtc, DateTime LastWriteUtc, DateTime CreatedUtc,
         long Bytes, bool Protected, bool Active, string SessionPrefix, string Label);
     private sealed record LabelNote(string Label);
+    private readonly record struct NoteFingerprint(long Bytes, DateTime ChangedUtc, DateTime CreatedUtc, FileAttributes Attributes);
+    private sealed record CachedNote(NoteFingerprint Fingerprint, string Label);
     private sealed record ScanResult(List<Entry> Entries, bool HadErrors);
 
     private static class Native
