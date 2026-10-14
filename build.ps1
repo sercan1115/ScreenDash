@@ -37,7 +37,7 @@ try {
     else { Write-Warning 'Die erzeugte EXE ist nicht digital signiert. Windows-SmartScreen kann warnen.' }
     Copy-Item -LiteralPath README.de.md -Destination dist\README.de.md
     if (Test-Path LICENSE) { Copy-Item -LiteralPath LICENSE -Destination dist\LICENSE }
-    if (Test-Path NEU-IN-1.5.de.md) { Copy-Item -LiteralPath NEU-IN-1.5.de.md -Destination dist\NEU-IN-1.5.de.md }
+    if (Test-Path NEU-IN-1.5.1.de.md) { Copy-Item -LiteralPath NEU-IN-1.5.1.de.md -Destination dist\NEU-IN-1.5.1.de.md }
     if (Test-Path SIGNIERUNG.de.md) { Copy-Item -LiteralPath SIGNIERUNG.de.md -Destination dist\SIGNIERUNG.de.md }
     if (Test-Path TESTBERICHT.de.md) { Copy-Item -LiteralPath TESTBERICHT.de.md -Destination dist\TESTBERICHT.de.md }
     if (Test-Path Drittanbieter-Lizenzen.txt) { Copy-Item -LiteralPath Drittanbieter-Lizenzen.txt -Destination dist\Drittanbieter-Lizenzen.txt }

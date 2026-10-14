@@ -143,11 +143,16 @@ public sealed partial class MainForm
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias; float scale = DeviceDpi / 96f;
             var color = !Enabled ? Mix(BackColor, SurroundingColor(this), .35) : _pressed ? FlatAppearance.MouseDownBackColor : Mix(BackColor, FlatAppearance.MouseOverBackColor, _hoverAmount);
             using var path = RoundPath(new RectangleF(.5f, .5f, Width - 1.5f, Height - 1.5f), 3 * scale);
-            using var fill = new SolidBrush(color); e.Graphics.FillPath(fill, path);
+            if (Primary && Enabled)
+            {
+                using var fill = new LinearGradientBrush(ClientRectangle, Mix(color, Color.White, .07), Mix(color, Color.Black, .08), LinearGradientMode.Vertical);
+                e.Graphics.FillPath(fill, path);
+            }
+            else { using var fill = new SolidBrush(color); e.Graphics.FillPath(fill, path); }
             bool darkSidebarButton = LeftAligned && BackColor.GetBrightness() < .25f;
             Color borderColor = darkSidebarButton ? Mix(Sidebar, Color.White, Active ? .2 : .1) : AccentBorder ? Mix(Line, Cyan, .5) : Line;
             using var border = new Pen(borderColor); if (!Primary || !Enabled) e.Graphics.DrawPath(border, path);
-            if (Active && LeftAligned) { using var accent = new Pen(Cyan, 2.5f * scale); e.Graphics.DrawLine(accent, 1.5f * scale, 10 * scale, 1.5f * scale, Height - 10 * scale); }
+            if (Active && LeftAligned) { using var accent = new Pen(Mix(ForeColor, color, .2), 2.5f * scale); e.Graphics.DrawLine(accent, 1.5f * scale, 10 * scale, 1.5f * scale, Height - 10 * scale); }
             Color textColor = Enabled ? ForeColor : Mix(ForeColor, color, .55);
             var area = Rectangle.Inflate(ClientRectangle, -(int)(9 * scale), -(int)(2 * scale));
             int iconSize = (int)(18 * scale), gap = (int)(8 * scale);
@@ -155,7 +160,7 @@ public sealed partial class MainForm
             {
                 using var indexFont = new Font("Segoe UI", 7.5f, FontStyle.Bold);
                 var indexArea = new Rectangle((int)(13 * scale), 0, (int)(23 * scale), Height);
-                TextRenderer.DrawText(e.Graphics, IndexLabel, indexFont, indexArea, Active ? Color.FromArgb(173, 166, 255) : Mix(textColor, color, .35), TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+                TextRenderer.DrawText(e.Graphics, IndexLabel, indexFont, indexArea, Active ? Color.FromArgb(63, 69, 78) : Mix(textColor, color, .35), TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
                 area.X = (int)(43 * scale); area.Width = Math.Max(0, Width - area.X - (int)(8 * scale));
             }
             else if (IconKind != AppGlyph.None)
@@ -178,12 +183,12 @@ public sealed partial class MainForm
         protected override void OnPaint(PaintEventArgs e)
         {
             e.Graphics.Clear(SurroundingColor(this)); if (Width < 3 || Height < 3) return; e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            using var fill = new SolidBrush(Cyan); e.Graphics.FillRectangle(fill, 0, 0, Width - 4, Height - 4);
+            using var fill = new LinearGradientBrush(ClientRectangle, Mix(Cyan, Color.White, .12), Mix(Cyan, Color.Black, .1), LinearGradientMode.Vertical); e.Graphics.FillRectangle(fill, 0, 0, Width - 4, Height - 4);
             using var outline = new Pen(Mix(Sidebar, Color.White, .25)); e.Graphics.DrawRectangle(outline, 4, 4, Width - 5, Height - 5);
             float s = Width / 44f; var state = e.Graphics.Save(); e.Graphics.ScaleTransform(s, s);
-            using var stroke = new Pen(Color.White, 1.7f) { LineJoin = LineJoin.Round, StartCap = LineCap.Round, EndCap = LineCap.Round };
+            using var stroke = new Pen(Color.FromArgb(18, 20, 24), 1.7f) { LineJoin = LineJoin.Round, StartCap = LineCap.Round, EndCap = LineCap.Round };
             using var display = RoundPath(new RectangleF(8, 9, 24, 18), 2); e.Graphics.DrawPath(stroke, display); e.Graphics.DrawLine(stroke, 15, 32, 25, 32); e.Graphics.DrawLine(stroke, 20, 27, 20, 32);
-            using var dot = new SolidBrush(Color.White); e.Graphics.FillEllipse(dot, 16, 14, 8, 8); e.Graphics.Restore(state);
+            using var dot = new SolidBrush(Color.FromArgb(18, 20, 24)); e.Graphics.FillEllipse(dot, 16, 14, 8, 8); e.Graphics.Restore(state);
         }
     }
     private sealed class BrandWordmark : Control
@@ -216,11 +221,13 @@ public sealed partial class MainForm
         protected override void OnPaintBackground(PaintEventArgs e)
         {
             e.Graphics.Clear(BackColor); if (Width < 2 || Height < 2) return;
+            using var fill = new LinearGradientBrush(ClientRectangle, Mix(BackColor, Color.White, .12), Mix(BackColor, Color.Black, .08), LinearGradientMode.Vertical);
+            e.Graphics.FillRectangle(fill, ClientRectangle);
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             float scale = DeviceDpi / 96f;
-            using var circle = new Pen(Color.FromArgb(45, Color.White), scale);
+            using var circle = new Pen(Color.FromArgb(38, Color.Black), scale);
             e.Graphics.DrawEllipse(circle, Width - 50 * scale, Height - 51 * scale, 80 * scale, 80 * scale);
-            using var line = new Pen(Color.FromArgb(45, Color.White), scale);
+            using var line = new Pen(Color.FromArgb(38, Color.Black), scale);
             e.Graphics.DrawLine(line, Width - 28 * scale, 0, Width, 28 * scale);
         }
     }

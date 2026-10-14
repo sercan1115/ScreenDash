@@ -2,7 +2,7 @@
 
 Eine lokale Bildschirm-Dashcam für **Windows 10/11 (64 Bit)**. ScreenDash zeichnet einen ausgewählten Monitor mit Systemton auf, speichert eine durchgehende Datei je Aufnahme und räumt alte Aufnahmen automatisch auf.
 
-**[Windows-Version herunterladen](https://github.com/sercan1115/ScreenDash/releases/latest)** · [Anleitung](README.de.md) · [Neuerungen in 1.5](NEU-IN-1.5.de.md)
+**[Windows-Version herunterladen](https://github.com/sercan1115/ScreenDash/releases/latest)** · [Anleitung](README.de.md) · [Neuerungen in 1.5.1](NEU-IN-1.5.1.de.md)
 
 ![ScreenDash – Aufnahmeübersicht mit Beispieldaten](docs/screenshots/dashboard.png)
 
@@ -11,7 +11,7 @@ Die Bilder zeigen die Oberfläche mit Beispieldaten. Ihre Auslastungsanzeigen si
 ## Funktionen
 
 - **Fenster und Desktop-Symbol:** sichtbar starten, beim Minimieren in der Taskleiste bleiben und per Doppelklick wieder öffnen. Die eigene Desktop-Verknüpfung wird beim Start angelegt und nach einem Update angepasst.
-- **Nordpoint-Gestaltung:** warme Papierflächen, dunkle Navigation, Indigo-Akzente, nummerierte Bereiche und große Serifenschrift. Kurze Hover- und Seitenübergänge; Animationstimer ruhen im Leerlauf und bei minimiertem Fenster.
+- **Schwarz und Silber:** dunkle Flächen, silberne Akzente, metallische Schaltflächen, nummerierte Bereiche und große Serifenschrift. Kurze Hover- und Seitenübergänge; Animationstimer ruhen im Leerlauf und bei minimiertem Fenster.
 - **Klarere Bedienung:** korrekte Audio- und Encoderanzeigen, sichtbare offene Einstellungen, erklärte Archivaktionen und zugängliche Eingabefelder.
 - **Lesezeichen:** während der Aufnahme Momente markieren, die ganze Datei schützen und später Clips davor/danach exportieren.
 - **Spielerkennung:** bei ausgewählten Spielen automatisch starten/stoppen; manuelles Stoppen wird respektiert. Anfangs ausgeschaltet.

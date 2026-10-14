@@ -10,8 +10,8 @@ public sealed partial class MainForm
         var brand = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty, BackColor = Sidebar };
         brand.Controls.Add(new BrandMark { Location = Point.Empty, Size = new Size(44, 44) });
         brand.Controls.Add(new BrandWordmark { Location = new Point(0, 59), Size = new Size(168, 34), AccessibleName = "ScreenDash" });
-        var tagline = TextLabel("DEIN LOKALER RÜCKBLICK", 7.2f, Color.FromArgb(172, 169, 165), FontStyle.Bold); tagline.Dock = DockStyle.None; tagline.SetBounds(1, 92, 168, 21); brand.Controls.Add(tagline);
-        var brandRule = new Panel { Location = new Point(0, 125), Size = new Size(168, 1), BackColor = Color.FromArgb(54, 53, 52) }; brand.Controls.Add(brandRule); sideGrid.Controls.Add(brand, 0, 0);
+        var tagline = TextLabel("DEIN LOKALER RÜCKBLICK", 7.2f, Muted, FontStyle.Bold); tagline.Dock = DockStyle.None; tagline.SetBounds(1, 92, 168, 21); brand.Controls.Add(tagline);
+        var brandRule = new Panel { Location = new Point(0, 125), Size = new Size(168, 1), BackColor = Line }; brand.Controls.Add(brandRule); sideGrid.Controls.Add(brand, 0, 0);
         var nav = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = Padding.Empty };
         string[] titles = ["Aufnahme", "Aufnahmen", "Einstellungen", "Werkzeuge"]; int[] pages = [0, 2, 1, 3];
         for (int i = 0; i < titles.Length; i++)
@@ -23,7 +23,7 @@ public sealed partial class MainForm
         var bottom = Grid(1, 4); bottom.RowStyles.Add(new RowStyle(SizeType.Absolute, 37)); bottom.RowStyles.Add(new RowStyle(SizeType.Absolute, 37)); bottom.RowStyles.Add(new RowStyle(SizeType.Absolute, 42)); bottom.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         var folder = SidebarAction("Ordner öffnen", AppGlyph.Folder); folder.Click += (_, _) => RunSync(_controller.OpenRecordingFolder); bottom.Controls.Add(folder, 0, 0);
         var logs = SidebarAction("Diagnose", AppGlyph.Activity); logs.Click += (_, _) => RunSync(_controller.OpenLogs); bottom.Controls.Add(logs, 0, 1);
-        var privacy = new StatusPill { Text = "LOKAL GESPEICHERT", ForeColor = Color.FromArgb(191, 185, 255), Font = new Font("Segoe UI", 7.4f, FontStyle.Bold), Dock = DockStyle.Fill, Margin = new Padding(0, 5, 0, 7) }; bottom.Controls.Add(privacy, 0, 2); bottom.Controls.Add(TextLabel("Version 1.5.0  ·  Windows", 8, Color.FromArgb(161, 158, 153)), 0, 3); sideGrid.Controls.Add(bottom, 0, 3); shell.Controls.Add(sidebar, 0, 0);
+        var privacy = new StatusPill { Text = "LOKAL GESPEICHERT", ForeColor = Cyan, Font = new Font("Segoe UI", 7.4f, FontStyle.Bold), Dock = DockStyle.Fill, Margin = new Padding(0, 5, 0, 7) }; bottom.Controls.Add(privacy, 0, 2); bottom.Controls.Add(TextLabel("Version 1.5.1  ·  Windows", 8, Muted), 0, 3); sideGrid.Controls.Add(bottom, 0, 3); shell.Controls.Add(sidebar, 0, 0);
         var main = Grid(1, 3); main.Padding = new Padding(28, 23, 28, 12); main.RowStyles.Add(new RowStyle(SizeType.Absolute, 84)); main.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); main.RowStyles.Add(new RowStyle(SizeType.Absolute, 29));
         var headerSurface = new EditorialHeader { Dock = DockStyle.Fill, BackColor = Canvas, Margin = new Padding(0, 0, 0, 10) };
         var header = Grid(2, 2); header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 184)); header.RowStyles.Add(new RowStyle(SizeType.Absolute, 47)); header.RowStyles.Add(new RowStyle(SizeType.Absolute, 26));
@@ -38,7 +38,7 @@ public sealed partial class MainForm
     {
         var button = (ThemeButton)ActionButton(text);
         button.IconKind = glyph; button.LeftAligned = true; button.Dock = DockStyle.Fill;
-        button.BackColor = Sidebar; button.ForeColor = Color.FromArgb(200, 197, 191);
+        button.BackColor = Sidebar; button.ForeColor = Cyan;
         button.FlatAppearance.MouseOverBackColor = Mix(Sidebar, Color.White, .08); button.FlatAppearance.MouseDownBackColor = Mix(Sidebar, Color.White, .13);
         button.Margin = new Padding(0, 0, 0, 6); button.Font = new Font("Segoe UI", 9);
         return button;
@@ -60,8 +60,8 @@ public sealed partial class MainForm
         _recordingMessage.Font = new Font("Segoe UI", 9.5f); _source.Font = new Font("Segoe UI", 9.3f);
         var clock = new ClockSurface { Dock = DockStyle.Fill, BackColor = Cyan, Padding = new Padding(11, 6, 11, 6), Margin = new Padding(15, 0, 0, 2) };
         var clockGrid = Grid(1, 2); clockGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 17)); clockGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        var timerHeading = TextLabel("SITZUNGSDAUER", 7.5f, Color.FromArgb(227, 225, 255), FontStyle.Bold); timerHeading.TextAlign = ContentAlignment.MiddleRight;
-        _elapsed.Font = new Font("Segoe UI", 24, FontStyle.Bold); _elapsed.ForeColor = Color.White; _elapsed.TextAlign = ContentAlignment.MiddleRight;
+        var timerHeading = TextLabel("SITZUNGSDAUER", 7.5f, Color.FromArgb(50, 55, 63), FontStyle.Bold); timerHeading.TextAlign = ContentAlignment.MiddleRight;
+        _elapsed.Font = new Font("Segoe UI", 24, FontStyle.Bold); _elapsed.ForeColor = Color.FromArgb(18, 20, 24); _elapsed.TextAlign = ContentAlignment.MiddleRight;
         clockGrid.Controls.Add(timerHeading, 0, 0); clockGrid.Controls.Add(_elapsed, 0, 1); clock.Controls.Add(clockGrid);
         heroGrid.Controls.Add(clock, 1, 0); heroGrid.SetRowSpan(clock, 2);
         heroGrid.Controls.Add(_recordingState, 0, 1); heroGrid.Controls.Add(_recordingMessage, 0, 2); heroGrid.SetColumnSpan(_recordingMessage, 2); heroGrid.Controls.Add(_source, 0, 3); heroGrid.SetColumnSpan(_source, 2);

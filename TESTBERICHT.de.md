@@ -1,5 +1,14 @@
 # ScreenDash – Prüfergebnis
 
+## Version 1.5.1 – 14. Oktober 2026
+
+- Die bestehenden 147 UI-Prüfungen bei 96 DPI bestehen auch mit Schwarz und Silber, einschließlich Kontrast, vollständig sichtbaren kompakten Aufnahmeaktionen, Statusanzeigen, gespeicherten Aufnahme-Einstellungen, Tastaturbedienung und ruhenden Animationstimern.
+- Aufnahme, Archiv, Einstellungen, Werkzeuge und Dialoge wurden mit Beispieldaten in der neuen Farbpalette gerendert und visuell geprüft. Die Vorschauen zeigen den direkt gezeichneten Fensterinhalt; native Windows-Rahmen sind ausgenommen, damit die Bitmap-Ausgabe keinen simulierten alten Fenstertitel zeichnet.
+- Das monochrome Windows-Icon wurde aus der nativen Vektorgeometrie für 16, 32, 48, 64, 128 und 256 Pixel erzeugt. SVG-Quelle und Exportskript liegen im Quellcode. Es wurde kein bestehendes Bitmap-Bild eingelesen oder bearbeitet.
+- Die metallischen Verläufe sind statische Zeichnungen. Es gibt keine neuen Timer, Hintergrunddienste oder Capture-Änderungen. Build/CI enthält weiterhin 349 Prüfungen ohne reale Aufnahme.
+
+Keine neue Lastmessung oder physische Prüfung hoher Monitor-Skalierung. Die EXE bleibt unsigniert.
+
 ## Version 1.5 – 14. Oktober 2026
 
 - 147 UI-Prüfungen bei 96 DPI mit künstlichen Daten bestanden, darunter 30 neue Prüfungen für die vier Audiozustände, Hardware-/Softwareanzeigen, offene Einstellungen, gespeicherte Werte beim Aufnahmestart, Vorrang von Aufnahme/Pause/Arbeit vor Entwurfshinweisen, Namen und Einheiten verschachtelter Eingaben, Erklärungen gesperrter Archivaktionen sowie die Update-Hilfe.

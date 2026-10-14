@@ -5,6 +5,8 @@ using ScreenDash;
 
 internal static class Program
 {
+    private static bool _clientOnlySnapshots;
+
     [STAThread]
     private static void Main(string[] args)
     {
@@ -16,13 +18,14 @@ internal static class Program
         int dpi = dpiArgument is null ? 96 : int.Parse(dpiArgument[6..]);
         if (dpi is not (96 or 144 or 192)) throw new ArgumentOutOfRangeException(nameof(args), "Preview DPI must be 96, 144 or 192.");
         bool renderOnly = args.Contains("--render-only", StringComparer.Ordinal);
+        _clientOnlySnapshots = args.Contains("--client-only", StringComparer.Ordinal);
         Directory.CreateDirectory(output);
         string iconPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "ScreenDash", "Assets", "screendash.ico"));
         using var previewIcon = new Icon(iconPath);
         using var controller = new PreviewController();
         using var form = new MainForm(controller, enableHotkeys: false);
         form.Icon = previewIcon;
-        form.Text = "ScreenDash 1.5.0 · Vorschau mit Beispieldaten";
+        form.Text = "ScreenDash 1.5.1 · Vorschau mit Beispieldaten";
         form.StartPosition = FormStartPosition.Manual;
         form.Location = new Point(-20000, -20000);
         form.ClientSize = new Size(1180, 780);
@@ -143,12 +146,12 @@ internal static class Program
     {
         if (form is MainForm) typeof(MainForm).GetMethod("CompletePageTransition", BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(form, null);
         LayoutTree(form); Application.DoEvents();
-        bool clientOnly = form.DeviceDpi != 96;
+        bool clientOnly = _clientOnlySnapshots || form.DeviceDpi != 96;
         using var bitmap = new Bitmap(clientOnly ? form.ClientSize.Width : form.Width, clientOnly ? form.ClientSize.Height : form.Height);
         if (clientOnly)
         {
-            // A simulated DPI event cannot change the host's physical window limits or bitmap DC.
-            // Draw the full logical client tree for geometry checks without cropped native chrome.
+            // Draw the native client tree directly without window chrome. Simulated DPI events
+            // also require this path because they cannot change the host's physical window limits or bitmap DC.
             using (var graphics = Graphics.FromImage(bitmap)) graphics.Clear(form.BackColor);
             foreach (Control control in form.Controls.Cast<Control>().Reverse()) control.DrawToBitmap(bitmap, control.Bounds);
         }

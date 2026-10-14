@@ -100,7 +100,7 @@ jobs:
         run: |
           dotnet publish ScreenDash/ScreenDash.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:DebugSymbols=false --output dist
           if ($LASTEXITCODE -ne 0) { throw 'Application publish failed.' }
-          Copy-Item -LiteralPath README.de.md, NEU-IN-1.5.de.md, SIGNIERUNG.de.md, TESTBERICHT.de.md, Drittanbieter-Lizenzen.txt -Destination dist
+          Copy-Item -LiteralPath README.de.md, NEU-IN-1.5.1.de.md, SIGNIERUNG.de.md, TESTBERICHT.de.md, Drittanbieter-Lizenzen.txt -Destination dist
           if (Test-Path -LiteralPath LICENSE) { Copy-Item -LiteralPath LICENSE -Destination dist }
 
       - name: Upload portable application
