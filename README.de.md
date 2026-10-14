@@ -1,6 +1,6 @@
-# ScreenDash 1.4.2
+# ScreenDash 1.5
 
-Die Neuerungen und Hinweise zum Update stehen in `NEU-IN-1.4.2.de.md`.
+Die Neuerungen und Hinweise zum Update stehen in `NEU-IN-1.5.de.md`.
 
 Eine lokale Bildschirm-Dashcam für Windows 10/11 (64 Bit). Sie nimmt **einen ausgewählten Monitor und den Ton eines Windows-Wiedergabegeräts** auf. Alle Videos bleiben auf deinem PC.
 
@@ -19,7 +19,8 @@ Minimieren behält das Programm in der Taskleiste. Ein erneuter Doppelklick öff
 
 ## Enthaltene Funktionen
 
-- **Dynamische Oberfläche:** neue Farbpalette, Karten, Statuschips und gezeichnete Symbole. Hover-Übergänge dauern ungefähr 160 ms, Seitenübergänge ungefähr 190 ms. Die Animationstimer stoppen danach und beim Verstecken der App; Windows-Einstellungen für abgeschaltete Animationen und hohen Kontrast werden berücksichtigt. Das Dashboard passt bei 1024 × 720 ohne vertikales Scrollen; kleinere Fenster können scrollen.
+- **Nordpoint-Gestaltung:** warme Papierflächen mit dunkler Navigation, Indigo-Akzente, schmale Linien, nummerierte Bereiche und Serifenschrift für die großen Überschriften. Hover-Übergänge dauern ungefähr 160 ms, Seitenübergänge ungefähr 190 ms. Die Animationstimer stoppen danach und beim Minimieren; Windows-Einstellungen für abgeschaltete Animationen und hohen Kontrast werden berücksichtigt. Das Dashboard passt bei 1024 × 720 ohne vertikales Scrollen; kleinere Fenster können scrollen.
+- **Klare Anzeigen und Eingaben:** das Dashboard benennt Systemton, Mikrofon und den tatsächlichen Encoder korrekt. Ungespeicherte Einstellungsänderungen sind auch nach dem Seitenwechsel sichtbar. Ein Aufnahmestart verwendet die gespeicherten Werte. Beschriftete Eingabefelder besitzen passende zugängliche Namen und Einheiten.
 - **Lesezeichen:** während der Aufnahme mit **Strg + Alt + F11** einen Moment markieren. Die ganze zugehörige Datei wird geschützt. Unter **Aufnahmen → Lesezeichen** benennen, entfernen oder nach dem Stoppen/Pausieren einen Clip mit wählbarer Zeit vor und nach dem Moment exportieren. Lesezeichen liegen in einer `.bookmarks.json` neben der MKV; beim Verschieben mitnehmen. Entfernen eines Lesezeichens hebt den Dateischutz nicht auf.
 - **Spielerkennung:** unter **Werkzeuge → Spielerkennung** genaue Programmnamen auswählen und ausdrücklich einschalten. Prüfung etwa alle sechs Sekunden, nur in deiner Windows-Sitzung. Nach Spielende wird eine von der Automatik gestartete Aufnahme nach mindestens zehn Sekunden Wartezeit geschlossen. Manuell gestartete Aufnahmen werden durch Spielende nicht gestoppt. Nach manuellem Stopp startet die Automatik erst wieder, wenn alle ausgewählten Spiele beendet waren. PC-Sperre, Standby, Speichergrenzen und Timer gelten weiterhin.
 - **Eigene Aufnahmeprofile:** unter **Werkzeuge → Aufnahmeprofile** Bildschirm, Audio, Mikrofon, Encoder und Qualität speichern. Anwenden setzt die Aufnahme-Einstellungen bei gestoppter Aufnahme; Speicherregeln, Autostart und Spielerkennung bleiben erhalten.

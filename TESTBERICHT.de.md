@@ -1,5 +1,15 @@
 # ScreenDash – Prüfergebnis
 
+## Version 1.5 – 14. Oktober 2026
+
+- 147 UI-Prüfungen bei 96 DPI mit künstlichen Daten bestanden, darunter 30 neue Prüfungen für die vier Audiozustände, Hardware-/Softwareanzeigen, offene Einstellungen, gespeicherte Werte beim Aufnahmestart, Vorrang von Aufnahme/Pause/Arbeit vor Entwurfshinweisen, Namen und Einheiten verschachtelter Eingaben, Erklärungen gesperrter Archivaktionen sowie die Update-Hilfe.
+- Kontrast der tatsächlich verwendeten Flächen und volle Beschriftungen aller kompakten Aufnahmeaktionen geprüft. Die gerenderten Ansichten für Aufnahme, Archiv, Einstellungen, Werkzeuge und Dialoge sowie normale, kompakte, große und minimale Fenster wurden visuell geprüft. Bei 1024 × 720 bleiben Aufnahmeaktionen und Dashboard ohne vertikales Scrollen sichtbar; im kleineren Mindestfenster wird gescrollt.
+- Die neuen Flächen, Linien, Symbole und geometrischen Formen sind native Zeichnungen. Georgia und Segoe UI sind Windows-Schriften; es werden keine Webfonts geladen. Die Gestaltung benötigt keine zusätzlichen Pakete, Bilder, Webansicht, Hintergrundtimer oder dauernde Animation.
+- Die unabhängige Prüfung der UI-Änderungen fand keine wesentlichen Regressionen in Start-/Stoppvorrang, gespeicherten Aufnahme-Einstellungen oder der Freigabe von Zeichenressourcen.
+- Build/CI umfasst jetzt insgesamt **349 Prüfungen ohne reale Aufnahme**: 177 Funktions-, 147 UI-, 20 Windows-Verknüpfungs- und 5 Signiervalidierungen.
+
+Die Aufnahme- und Audiotechnik wurde nicht verändert. Die Vorschauen enthalten ausschließlich Beispieldaten; ihre Auslastungswerte sind keine Messwerte. Es gibt keinen neuen Spiele-/GPU-Benchmark oder physischen Test eines Monitorwechsels mit hoher Windows-Skalierung. Die EXE bleibt unsigniert, da keine verifizierte Signieridentität verfügbar ist.
+
 ## Version 1.4.2 – 14. Oktober 2026
 
 - 117 Oberfläche-/Animationsprüfungen mit künstlichen Daten: zusätzlich normaler Start, sichtbarer Taskleisteneintrag beim Minimieren, minimierter Start, Wiederherstellen, Weiteraufnahme beim Schließen sowie sofortiges Beenden aller Bewegungen beim Minimieren. Keine Bildschirm- oder Tonaufnahme in diesen Prüfungen.

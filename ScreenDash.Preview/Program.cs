@@ -22,7 +22,7 @@ internal static class Program
         using var controller = new PreviewController();
         using var form = new MainForm(controller, enableHotkeys: false);
         form.Icon = previewIcon;
-        form.Text = "ScreenDash 1.4.2 · Vorschau mit Beispieldaten";
+        form.Text = "ScreenDash 1.5.0 · Vorschau mit Beispieldaten";
         form.StartPosition = FormStartPosition.Manual;
         form.Location = new Point(-20000, -20000);
         form.ClientSize = new Size(1180, 780);
@@ -180,6 +180,31 @@ internal static class Program
         foreach (Control child in control.Controls) LayoutTree(child);
     }
 
+    private static IEnumerable<Control> ControlsIn(Control control)
+    {
+        yield return control;
+        foreach (Control child in control.Controls)
+            foreach (Control descendant in ControlsIn(child)) yield return descendant;
+    }
+
+    private static double TextContrast(Control control)
+    {
+        Control? surface = control;
+        while (surface is not null && surface.BackColor.A != 255) surface = surface.Parent;
+        return ContrastRatio(control.ForeColor, surface?.BackColor ?? Color.White);
+    }
+
+    private static double ContrastRatio(Color first, Color second)
+    {
+        static double Luminance(Color color)
+        {
+            static double Linear(byte component) { double value = component / 255d; return value <= .04045 ? value / 12.92 : Math.Pow((value + .055) / 1.055, 2.4); }
+            return .2126 * Linear(color.R) + .7152 * Linear(color.G) + .0722 * Linear(color.B);
+        }
+        double a = Luminance(first), b = Luminance(second);
+        return (Math.Max(a, b) + .05) / (Math.Min(a, b) + .05);
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct NativeRect { public int Left, Top, Right, Bottom; }
     [DllImport("user32.dll")]
@@ -195,6 +220,7 @@ internal static class Program
         using var uiContext = new WindowsFormsSynchronizationContext();
         SynchronizationContext.SetSynchronizationContext(uiContext);
         T Field<T>(string name) where T : class => (T)typeof(MainForm).GetField(name, flags)!.GetValue(form)!;
+        string Tip(string name) => Field<ToolTip>("_tips").GetToolTip(Field<Control>(name)) ?? "";
         object? Call(string name, params object[] args)
         {
             SynchronizationContext.SetSynchronizationContext(uiContext);
@@ -237,7 +263,51 @@ internal static class Program
         Check(!Field<Button>("_save").Enabled, "unchanged settings do not offer a redundant save");
         Field<NumericUpDown>("_customFps").Value = 21;
         Check(Field<Button>("_save").Enabled && Field<Label>("_settingsHint").Text.Contains("Ungespeicherte"), "unsaved settings have a visible state");
+        Check(Field<Label>("_headerState").Text.Contains("ÄNDERUNGEN") && Field<Button[]>("_nav")[1].AccessibleName!.Contains("ungespeicherte"), "idle drafts are visible in the header and accessible settings navigation");
+        Call("ShowPage", 0);
+        Check(Field<Label>("_recordingMessage").Text.Contains("gespeicherte Einstellungen") && Field<Button>("_toggle").Enabled && controller.Settings.Fps != 21, "returning to capture explains that start uses the saved settings without silently saving the draft");
+        var draftStartTask = (Task)Call("ToggleRecordingActionAsync")!;
+        Check(draftStartTask.IsCompletedSuccessfully && controller.StartedSettings!.Fps == controller.Settings.Fps && controller.StartedSettings.Fps != 21 && controller.SettingsSaves == 0 && Field<Button>("_save").Enabled, "starting from an unsaved draft passes the saved configuration to capture and retains the draft");
+        typeof(MainForm).GetField("_uiBusy", flags)!.SetValue(form, true); Call("RefreshDashboard");
+        Check(Field<Label>("_headerState").Text.Contains("BEARBEITET") && !Field<Label>("_recordingMessage").Text.Contains("Ungespeicherte") && !Field<Button>("_toggle").Enabled, "busy work takes priority over the idle draft notice");
+        typeof(MainForm).GetField("_uiBusy", flags)!.SetValue(form, false);
+        controller.Recording = true; Call("RefreshDashboard");
+        Check(Field<Label>("_headerState").Text.Contains("AUFNAHME") && !Field<Label>("_recordingMessage").Text.Contains("Ungespeicherte") && !Field<Button>("_save").Enabled, "an active recording takes priority over the idle draft notice and locks save");
+        controller.Recording = false; controller.Paused = true; Call("RefreshDashboard");
+        Check(Field<Label>("_headerState").Text == "PAUSIERT", "a paused session keeps its state visible even while a draft exists");
+        controller.Paused = false; Call("ShowPage", 1); Call("RefreshDashboard");
+        Field<Button>("_discard").PerformClick();
+        Check(!Field<Button>("_save").Enabled && Field<Label>("_headerState").Text == "BEREIT" && !Field<Button[]>("_nav")[1].AccessibleName!.Contains("ungespeicherte") && !Field<Label>("_recordingMessage").Text.Contains("gespeicherte Einstellungen"), "discard clears draft indicators on every page");
+        int savedFps = controller.Settings.Fps; Field<NumericUpDown>("_customFps").Value = 21;
+        var saveSettingsTask = (Task)Call("SaveSettingsAsync")!; Application.DoEvents();
+        Check(saveSettingsTask.IsCompletedSuccessfully && controller.Settings.Fps == 21 && controller.SettingsSaves == 1 && !Field<Button>("_save").Enabled && Field<Label>("_headerState").Text == "BEREIT", "saving commits the synthetic draft and clears its unsaved state");
+        controller.Settings.Fps = savedFps;
         Call("LoadSettings");
+        bool savedSystemAudio = controller.Settings.AudioEnabled, savedMicrophoneAudio = controller.Settings.MicrophoneEnabled;
+        foreach (var mode in new[] { (System: true, Microphone: false, Text: "Systemton an"), (System: true, Microphone: true, Text: "Systemton + Mikrofon"), (System: false, Microphone: true, Text: "Nur Mikrofon"), (System: false, Microphone: false, Text: "Ohne Ton") })
+        {
+            controller.Settings.AudioEnabled = mode.System; controller.Settings.MicrophoneEnabled = mode.Microphone; Call("RefreshDashboard");
+            Check(Field<Label>("_source").Text.Contains(mode.Text), $"dashboard reports saved audio mode: {mode.Text}");
+        }
+        controller.Settings.AudioEnabled = savedSystemAudio; controller.Settings.MicrophoneEnabled = savedMicrophoneAudio;
+        string savedEncoder = controller.Encoder;
+        foreach (string encoder in new[] { "NVIDIA NVENC", "AMD AMF", "Intel Quick Sync", "h264_qsv" })
+        {
+            controller.Encoder = encoder; Call("RefreshDashboard");
+            Check(Field<Label>("_encoderDetail").Text.StartsWith("Hardware") && Tip("_encoderDetail").Contains("GPU"), $"hardware encoder detail accurately describes {encoder}");
+        }
+        controller.Encoder = "Software · libx264"; Call("RefreshDashboard");
+        Check(Field<Label>("_encoderDetail").Text.StartsWith("Software") && Tip("_encoderDetail").Contains("Ausweichlösung"), "a software fallback is labelled as CPU encoding rather than hardware");
+        controller.Settings.EncoderMode = "Software"; Call("RefreshDashboard");
+        Check(Tip("_encoderDetail").Contains("CPU") && !Tip("_encoderDetail").Contains("Ausweichlösung"), "explicit software encoding explains CPU use without implying fallback");
+        controller.Settings.EncoderMode = "Auto"; controller.Encoder = ""; Call("RefreshDashboard");
+        Check(Field<Label>("_encoderDetail").Text.Contains("Startprüfung"), "an unselected encoder does not claim hardware was already validated");
+        controller.Encoder = savedEncoder; Call("LoadSettings"); Call("RefreshDashboard");
+        string[] namedSettings = ["_display", "_audio", "_directory", "_profile", "_encoderChoice", "_customFps", "_customBitrate", "_segment", "_retention", "_maxStorage", "_minFree", "_protectMinutes", "_autoStopMinutes", "_microphone", "_systemGain", "_microphoneGain", "_silenceSeconds"];
+        Check(namedSettings.Select(Field<Control>).All(control => !string.IsNullOrWhiteSpace(control.AccessibleName)), "direct and nested settings inputs expose nonempty accessible field names");
+        string[] settingsWithUnits = ["_customFps", "_customBitrate", "_segment", "_retention", "_maxStorage", "_minFree", "_protectMinutes", "_autoStopMinutes", "_systemGain", "_microphoneGain", "_silenceSeconds"];
+        Check(settingsWithUnits.Select(Field<NumericUpDown>).All(control => !string.IsNullOrWhiteSpace(control.AccessibleDescription)) && Field<NumericUpDown>("_retention").AccessibleName != Field<NumericUpDown>("_maxStorage").AccessibleName, "numeric fields retain their units and distinct purposes for assistive technology");
+        Check(!string.IsNullOrWhiteSpace(filter.AccessibleName) && !string.IsNullOrWhiteSpace(date.AccessibleName) && search.AccessibleDescription!.Contains("Notizen"), "archive search and filters explain their purpose without relying on placeholder text");
         Check(Field<CheckBox>("_singleFile").Checked && !Field<NumericUpDown>("_segment").Enabled, "continuous file is the default and disables segment length");
         typeof(MainForm).GetField("_exporting", flags)!.SetValue(form, true); controller.Recording = true; Call("RefreshDashboard");
         Check(Field<Button>("_toggle").Enabled && Field<Button>("_pause").Enabled && !Field<Button>("_export").Enabled, "export leaves recording controls available but prevents another export");
@@ -281,14 +351,17 @@ internal static class Program
         var heldExportTask = (Task)Call("RunArchiveExportAsync", heldExport, "Prüfexport", (Func<string>)(() => "Test"))!;
         Call("RefreshDashboard");
         Check(Field<Button>("_cancelExport").Visible && Field<Button>("_toggle").Enabled && Field<Button>("_pause").Enabled && !Field<Button>("_clip").Enabled, "an actual pending export keeps capture controls usable and exposes cancellation");
+        Check(Field<Label>("_archiveProgress").Text.Contains("Prüfexport"), "selection hints do not overwrite the progress of a pending export");
         Call("CancelExport"); deadline = DateTime.UtcNow.AddSeconds(2);
         while (!heldExportTask.IsCompleted && DateTime.UtcNow < deadline) { Application.DoEvents(); Thread.Sleep(10); }
         Check(heldExportTask.IsCompletedSuccessfully && !Field<Button>("_cancelExport").Visible && Field<Button>("_clip").Enabled, "cancelled export clears its busy state and re-enables tools");
         controller.Recording = false;
         grid.Rows[1].Selected = true; Call("UpdateRecordingActions");
         Check(!Field<Button>("_clip").Enabled, "multiple selected recordings disable clip export");
+        Check(!Field<Button>("_play").Enabled && !Field<Button>("_export").Enabled && Field<Label>("_archiveProgress").Text.Contains("eine Aufnahme auswählen"), "multiple-selection hints explain how to enable single-file playback and export");
         controller.ArchiveOverride = [new RecordingInfo("active.mkv", DateTime.UtcNow, 1024, false, true)]; Call("RefreshRecordings", true); grid.Rows[0].Selected = true; Call("UpdateRecordingActions");
         Check(!Field<Button>("_clip").Enabled, "an active recording cannot be clipped");
+        Check(!Field<Button>("_play").Enabled && !Field<Button>("_export").Enabled && Field<Label>("_archiveProgress").Text.Contains("läuft noch") && Field<Label>("_archiveProgress").Text.Contains("pausieren oder stoppen"), "active-file hints explain why playback and export are unavailable and how to finish the file");
         Call("ShowPage", 1); controller.Settings.AutoStopMinutes = 0; Call("LoadSettings");
         Check(!Field<CheckBox>("_autoStopEnabled").Checked && !Field<NumericUpDown>("_autoStopMinutes").Enabled && ((AppSettings)Call("ReadSettings")!).AutoStopMinutes == 0, "auto stop remains disabled by default");
         Field<CheckBox>("_autoStopEnabled").Checked = true; Field<NumericUpDown>("_autoStopMinutes").Value = 17;
@@ -313,6 +386,7 @@ internal static class Program
         ClipField<NumericUpDown>("_duration").Value = 5;
         Check(ClipField<Button>("_accept").Enabled, "a clip ending exactly at the recording boundary is accepted");
         clipDialog.Hide(); controller.Paused = false; controller.Recording = false; controller.DelayNextStart = true; controller.HoldStop = true; Call("ShowPage", 0);
+        int startsBeforeDelayedCapture = controller.StartRequests;
         var delayedStart = (Task)Call("ToggleRecordingActionAsync")!; Call("RefreshDashboard");
         Check(!delayedStart.IsCompleted && Field<Button>("_toggle").Enabled && Field<Button>("_toggle").Text.Contains("stoppen") && Field<ToolStripMenuItem>("_trayToggle").Enabled, "stop button and tray remain usable while an encoder start is pending");
         Check(!Field<Button>("_pause").Enabled && !Field<Button>("_protect").Enabled, "other capture actions stay disabled during startup");
@@ -320,7 +394,7 @@ internal static class Program
         Check(controller.StopRequests == 1 && !delayedStop.IsCompleted && !delayedStart.IsCompleted, "a stop request reaches the controller before delayed start completes");
         Check(!Field<Button>("_toggle").Enabled && Field<Button>("_toggle").Text.Contains("gestoppt"), "pending stop has a distinct disabled state");
         Call("ToggleRecordingActionAsync");
-        Check(controller.StopRequests == 1 && controller.StartRequests == 1, "repeated toggle cannot issue another stop or start while stopping");
+        Check(controller.StopRequests == 1 && controller.StartRequests == startsBeforeDelayedCapture + 1, "repeated toggle cannot issue another stop or start while stopping");
         controller.CompleteHeldStop(); deadline = DateTime.UtcNow.AddSeconds(5);
         while ((!delayedStart.IsCompleted || !delayedStop.IsCompleted) && DateTime.UtcNow < deadline) { Application.DoEvents(); Thread.Sleep(10); }
         Check(delayedStart.IsCompletedSuccessfully && delayedStop.IsCompletedSuccessfully && Field<Button>("_toggle").Enabled && Field<Button>("_toggle").Text.Contains("starten"), $"cancelled startup returns to idle without an error dialog (start {delayedStart.Status}; stop {delayedStop.Status}; button {Field<Button>("_toggle").Enabled}: {Field<Button>("_toggle").Text})");
@@ -368,6 +442,8 @@ internal static class Program
         prepareTask = (Task)Call("PrepareUpdateAsync")!; Application.DoEvents();
         Check(prepareTask.IsCompletedSuccessfully && Field<Button>("_launchUpdate").Enabled && !Field<Button>("_downloadUpdate").Enabled, "prepared update requires a distinct restart action");
         Check(Field<Button>("_openUpdateFolder").Enabled && Field<TextBox>("_updateDirectory").ReadOnly && Field<TextBox>("_updateDirectory").Text.Contains("DemoUpdate"), "prepared portable update exposes its new versions folder");
+        var updateHelp = Field<Panel[]>("_toolTabs")[2].Controls.Cast<Control>().SelectMany(ControlsIn).OfType<Label>().Select(label => label.Text).FirstOrDefault(text => text.Contains("Desktopverknüpfung"));
+        Check(updateHelp is not null && updateHelp.Contains("automatisch") && updateHelp.Contains("manuell erstellte"), "portable update help explains automatic switching and the separate handling of manual shortcuts");
         var momentType = typeof(MainForm).GetNestedType("MomentClipDialog", BindingFlags.NonPublic)!;
         using var moment = (Form)Activator.CreateInstance(momentType, ["Demo · Moment", TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(40)])!;
         moment.StartPosition = FormStartPosition.Manual; moment.Location = new Point(-20000, -20000); moment.Show(); Application.DoEvents();
@@ -424,7 +500,12 @@ internal static class Program
         Check(Field<TextBox>("_search").Width >= 140 * form.DeviceDpi / 96 && Field<ComboBox>("_dateFilter").Height > 0, "compact archive retains a usable search and date filter");
         Call("ShowPage", 0); Call("CompletePageTransition"); form.PerformLayout(); Application.DoEvents();
         Check(!Field<Panel>("_dashboard").VerticalScroll.Visible, "compact dashboard presents its controls and metrics without a page scrollbar");
+        Check(Field<Label>("_encoderDetail").Visible && Field<Label>("_encoderDetail").Parent is not null, "the live encoder detail is connected to the visible dashboard metric");
         Check(new[] { "_toggle", "_pause", "_protect", "_bookmark" }.Select(Field<Button>).All(button => button.Parent!.ClientRectangle.Contains(button.Bounds)), "all four dashboard capture actions stay inside their compact viewport");
+        Check(new[] { "_toggle", "_pause", "_protect", "_bookmark" }.Select(Field<Button>).All(button => TextRenderer.MeasureText(button.Text, button.Font, Size.Empty, TextFormatFlags.NoPadding | TextFormatFlags.SingleLine).Width + 44 * form.DeviceDpi / 96 <= button.ClientSize.Width), "compact capture buttons fit their full action labels alongside their icons");
+        string[] bodyText = ["_pageSubtitle", "_recordingMessage", "_source", "_footer", "_encoderDetail", "_autoStopCountdown"];
+        Check(bodyText.Select(Field<Label>).All(label => TextContrast(label) >= 4.5), "dashboard body text meets readable contrast against its actual surfaces");
+        Check(TextContrast(Field<Label>("_pageTitle")) >= 3 && TextContrast(Field<Label>("_elapsed")) >= 3 && ContrastRatio(Field<Button>("_toggle").ForeColor, Field<Button>("_toggle").BackColor) >= 4.5, "large display text and the primary capture action remain legible");
         var hoverButton = Field<Button[]>("_nav")[0];
         var hoverType = hoverButton.GetType();
         bool HoverRunning() => (bool)hoverType.GetProperty("AnimationRunning")!.GetValue(hoverButton)!;
@@ -484,6 +565,9 @@ internal static class Program
 
 internal sealed class PreviewController : IAppController
 {
+    public int SettingsSaves { get; private set; }
+    public string Encoder { get; set; } = "NVIDIA NVENC";
+    public AppSettings? StartedSettings { get; private set; }
     public int BookmarksAdded { get; private set; }
     public int ProfileSaves { get; private set; }
     public int UpdateChecks { get; private set; }
@@ -504,17 +588,17 @@ internal sealed class PreviewController : IAppController
     private TaskCompletionSource? _heldStart, _heldStop;
     public IReadOnlyList<RecordingInfo>? ArchiveOverride { get; set; }
     public TimeSpan? Remaining { get; set; } = TimeSpan.FromMinutes(42.6);
-    public AppSettings Settings { get; } = new() { RecordingDirectory = @"C:\Videos\ScreenDash", DisplayId = "test", AudioDeviceId = "speakers", AutoStopMinutes = 60 };
+    public AppSettings Settings { get; private set; } = new() { RecordingDirectory = @"C:\Videos\ScreenDash", DisplayId = "test", AudioDeviceId = "speakers", AutoStopMinutes = 60 };
     public IReadOnlyList<DisplaySource> Displays { get; } = [new("test", "Bildschirm 1 · 2560 × 1440", 0, 0, 0, 0, 2560, 1440), new("second", "Bildschirm 2 · 1920 × 1080", 0, 1, 2560, 0, 1920, 1080)];
     public IReadOnlyList<AudioSource> Microphones { get; } = [new("mic", "Headset · Mikrofon"), new("usb", "USB · Mikrofon")];
     public IReadOnlyList<AudioSource> AudioDevices { get; } = [new("speakers", "Lautsprecher · Realtek Audio"), new("headset", "Headset · Spielausgabe")];
-    public DashboardStatus Status => new(Recording, StartPending || StopPending, Recording ? "Bildschirm 1 wird im Hintergrund aufgenommen. Du kannst ScreenDash minimieren." : "Bereit für die erste Aufnahme", "NVIDIA NVENC", TimeSpan.FromMinutes(17.4), Recording ? 1.7 : 0.2, 83 * 1024L * 1024, 15,
+    public DashboardStatus Status => new(Recording, StartPending || StopPending, Recording ? "Bildschirm 1 wird im Hintergrund aufgenommen. Du kannst ScreenDash minimieren." : "Bereit für die erste Aufnahme", Encoder, TimeSpan.FromMinutes(17.4), Recording ? 1.7 : 0.2, 83 * 1024L * 1024, 15,
         new(0, 0, 6L * 1024 * 1024 * 1024, 512L * 1024 * 1024, 185L * 1024 * 1024 * 1024, true, ""), Armed: Recording || Paused || StartPending && !_startCanceled, Paused: Paused, PauseReason: Paused ? "Manuell pausiert" : "", AudioPeak: Recording ? 0.26 : 0, AudioDevice: "Headset · Spielausgabe", Remaining: Recording || Paused ? Remaining : null);
     public event Action? Changed;
     public event Action<string>? Notice { add { } remove { } }
     public async Task ToggleRecordingAsync()
     {
-        StartRequests++;
+        StartRequests++; StartedSettings = Settings.Clone();
         if (!DelayNextStart) return;
         DelayNextStart = false; StartPending = true; _startCanceled = false; _heldStart = new(TaskCreationOptions.RunContinuationsAsynchronously); Changed?.Invoke();
         try { await _heldStart.Task; }
@@ -529,7 +613,7 @@ internal sealed class PreviewController : IAppController
     public void CompleteHeldStop() { HoldStop = false; _heldStop?.TrySetResult(); }
     public Task PauseAsync() => Task.CompletedTask;
     public Task ResumeAsync() => Task.CompletedTask;
-    public Task SaveSettingsAsync(AppSettings settings) => Task.CompletedTask;
+    public Task SaveSettingsAsync(AppSettings settings) { SettingsSaves++; Settings = settings.Clone(); return Task.CompletedTask; }
     public Task RefreshDevicesAsync() => Task.CompletedTask;
     public Task ProtectRecentAsync() => Task.CompletedTask;
     public IReadOnlyList<RecordingInfo> GetRecordings()
