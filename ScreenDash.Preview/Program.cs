@@ -1,5 +1,6 @@
 using System.Drawing.Imaging;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using ScreenDash;
 
 internal static class Program
@@ -7,18 +8,32 @@ internal static class Program
     [STAThread]
     private static void Main(string[] args)
     {
-        Application.SetHighDpiMode(HighDpiMode.DpiUnaware);
+        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
-        string output = Path.GetFullPath(args.Length > 0 ? args[0] : "work/ui-preview");
+        string output = Path.GetFullPath(args.FirstOrDefault(arg => !arg.StartsWith("--", StringComparison.Ordinal)) ?? "work/ui-preview");
+        var dpiArgument = args.FirstOrDefault(arg => arg.StartsWith("--dpi=", StringComparison.Ordinal));
+        int dpi = dpiArgument is null ? 96 : int.Parse(dpiArgument[6..]);
+        if (dpi is not (96 or 144 or 192)) throw new ArgumentOutOfRangeException(nameof(args), "Preview DPI must be 96, 144 or 192.");
+        bool renderOnly = args.Contains("--render-only", StringComparer.Ordinal);
         Directory.CreateDirectory(output);
+        string iconPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "ScreenDash", "Assets", "screendash.ico"));
+        using var previewIcon = new Icon(iconPath);
         using var controller = new PreviewController();
         using var form = new MainForm(controller, enableHotkeys: false);
-        form.Text = "ScreenDash 1.4 · Vorschau mit Beispieldaten";
+        form.Icon = previewIcon;
+        form.Text = "ScreenDash 1.4.1 · Vorschau mit Beispieldaten";
         form.StartPosition = FormStartPosition.Manual;
         form.Location = new Point(-20000, -20000);
         form.ClientSize = new Size(1180, 780);
         form.Show();
+        ApplyPreviewDpi(form, dpi);
+        SetLogicalClientSize(form, new Size(1180, 780));
+        Console.WriteLine($"Preview DPI applied: {form.DeviceDpi}; requested: {dpi}. DPI events are simulated on this off-screen window.");
+        if (args.Contains("--checks-only", StringComparer.Ordinal))
+        {
+            SetLogicalClientSize(form, new Size(1024, 720)); RunUiChecks(form, controller); return;
+        }
         var showPage = typeof(MainForm).GetMethod("ShowPage", BindingFlags.NonPublic | BindingFlags.Instance)!;
         var refreshDashboard = typeof(MainForm).GetMethod("RefreshDashboard", BindingFlags.NonPublic | BindingFlags.Instance)!;
         string[] names = ["01-Aufnahme", "02-Einstellungen", "03-Aufnahmen", "07-Werkzeuge"];
@@ -34,19 +49,14 @@ internal static class Program
             }
             form.PerformLayout();
             Application.DoEvents();
-            using var bitmap = new Bitmap(form.Width, form.Height);
-            form.DrawToBitmap(bitmap, new Rectangle(Point.Empty, form.Size));
-            string file = Path.Combine(output, names[page] + ".png");
-            bitmap.Save(file, ImageFormat.Png);
-            Console.WriteLine(file);
+            SaveSnapshot(form, Path.Combine(output, names[page] + ".png"));
         }
         var toolTab = typeof(MainForm).GetMethod("ShowToolTab", BindingFlags.NonPublic | BindingFlags.Instance)!;
         showPage.Invoke(form, [3]);
         for (int tab = 1; tab < 3; tab++)
         {
             toolTab.Invoke(form, [tab]); form.PerformLayout(); Application.DoEvents();
-            using var bitmap = new Bitmap(form.Width, form.Height); form.DrawToBitmap(bitmap, new Rectangle(Point.Empty, form.Size));
-            bitmap.Save(Path.Combine(output, $"08-Werkzeuge-{tab}.png"), ImageFormat.Png);
+            SaveSnapshot(form, Path.Combine(output, $"08-Werkzeuge-{tab}.png"));
         }
         toolTab.Invoke(form, [0]);
         var settingTab = typeof(MainForm).GetMethod("ShowSettingTab", BindingFlags.NonPublic | BindingFlags.Instance)!;
@@ -54,35 +64,142 @@ internal static class Program
         for (int tab = 1; tab < 4; tab++)
         {
             settingTab.Invoke(form, [tab]); form.PerformLayout(); Application.DoEvents();
-            using var bitmap = new Bitmap(form.Width, form.Height); form.DrawToBitmap(bitmap, new Rectangle(Point.Empty, form.Size));
-            bitmap.Save(Path.Combine(output, $"04-Einstellungen-{tab}.png"), ImageFormat.Png);
+            SaveSnapshot(form, Path.Combine(output, $"04-Einstellungen-{tab}.png"));
         }
-        form.ClientSize = new Size(1024, 720);
+        SetLogicalClientSize(form, new Size(1024, 720));
         for (int page = 0; page < 4; page++)
         {
             controller.Recording = page == 0; refreshDashboard.Invoke(form, null); showPage.Invoke(form, [page]);
             if (page == 1) settingTab.Invoke(form, [2]);
             form.PerformLayout(); Application.DoEvents();
-            using var bitmap = new Bitmap(form.Width, form.Height); form.DrawToBitmap(bitmap, new Rectangle(Point.Empty, form.Size));
-            bitmap.Save(Path.Combine(output, $"05-Kompakt-{page}.png"), ImageFormat.Png);
+            SaveSnapshot(form, Path.Combine(output, $"05-Kompakt-{page}.png"));
             if (page == 0)
             {
                 var dashboard = (Panel)typeof(MainForm).GetField("_dashboard", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(form)!;
                 Console.WriteLine($"Compact dashboard: {dashboard.ClientSize}, grid {dashboard.Controls[0].Size}, DPI {form.DeviceDpi}, scroll {dashboard.DisplayRectangle}");
+                if (args.Contains("--layout-report", StringComparer.Ordinal))
+                    for (Control? control = dashboard; control is not null; control = control.Parent)
+                        Console.WriteLine($"Layout {control.GetType().Name}: bounds {control.Bounds}, client {control.ClientRectangle}, display {control.DisplayRectangle}, padding {control.Padding}, scale DPI {control.DeviceDpi}");
             }
         }
-        RunUiChecks(form, controller);
+        foreach (var size in new[] { (Name: "09-Gross", Size: new Size(1440, 900)), (Name: "10-Minimum", Size: new Size(980, 660)) })
+        {
+            SetLogicalClientSize(form, size.Size);
+            for (int page = 0; page < 4; page++)
+            {
+                controller.Recording = page == 0; refreshDashboard.Invoke(form, null); showPage.Invoke(form, [page]);
+                if (page == 1) settingTab.Invoke(form, [0]);
+                if (page == 3) toolTab.Invoke(form, [0]);
+                form.PerformLayout(); Application.DoEvents();
+                SaveSnapshot(form, Path.Combine(output, $"{size.Name}-{page}.png"));
+            }
+        }
+        SetLogicalClientSize(form, new Size(1024, 720));
+        if (!renderOnly) RunUiChecks(form, controller);
         var clipDialogType = typeof(MainForm).GetNestedType("ClipDialog", BindingFlags.NonPublic)!;
         using var clipDialog = (Form)Activator.CreateInstance(clipDialogType, ["ScreenDash_Beispiel.mkv", new MediaDetails(TimeSpan.FromMinutes(8.2), 2560, 1440, true)])!;
+        clipDialog.Icon = previewIcon;
         clipDialog.StartPosition = FormStartPosition.Manual; clipDialog.Location = new Point(-20000, -20000); clipDialog.Show(); clipDialog.PerformLayout(); Application.DoEvents();
-        using var clipBitmap = new Bitmap(clipDialog.Width, clipDialog.Height); clipDialog.DrawToBitmap(clipBitmap, new Rectangle(Point.Empty, clipDialog.Size)); clipBitmap.Save(Path.Combine(output, "06-Clip.png"), ImageFormat.Png);
+        ApplyPreviewDpi(clipDialog, dpi); clipDialog.PerformLayout(); Application.DoEvents();
+        SaveSnapshot(clipDialog, Path.Combine(output, "06-Clip.png"));
+        RenderFeatureDialogs(controller, output, dpi, previewIcon);
     }
+
+    private static void RenderFeatureDialogs(PreviewController controller, string output, int dpi, Icon icon)
+    {
+        const BindingFlags flags = BindingFlags.NonPublic | BindingFlags.Instance;
+        var demoRecording = new RecordingInfo(@"C:\Videos\ScreenDash\ScreenDash_20261014_204000_000.mkv", new DateTime(2026, 10, 14, 18, 40, 0, DateTimeKind.Utc), 109L * 1024 * 1024, true, false, "Demo · Match mit Freunden");
+        var bookmarks = new RecordingBookmark[] { new("first", TimeSpan.FromSeconds(152), new DateTime(2026, 10, 14, 18, 42, 32, DateTimeKind.Utc), "Demo · Entscheidender Treffer"), new("second", TimeSpan.FromSeconds(317), new DateTime(2026, 10, 14, 18, 45, 17, DateTimeKind.Utc), "Demo · Das nächste Highlight") };
+        (string Type, string File, object[] Args)[] previews = [
+            ("BookmarkDialog", "11-Lesezeichen.png", [controller, demoRecording, bookmarks]),
+            ("MomentClipDialog", "12-Moment-Clip.png", ["Demo · Entscheidender Treffer", TimeSpan.FromSeconds(152), TimeSpan.FromMinutes(8.2)]),
+            ("GamePickerDialog", "13-Spiele-Auswahl.png", [new string[] { "DemoGame.exe", "SecondGame.exe", "ThirdGame.exe" }, new string[] { "DemoGame.exe", "SavedGame.exe" }]),
+            ("TimeSearchDialog", "14-Zeitsuche.png", [])
+        ];
+        foreach (var preview in previews)
+        {
+            var type = typeof(MainForm).GetNestedType(preview.Type, BindingFlags.NonPublic)!;
+            using var dialog = (Form)Activator.CreateInstance(type, preview.Args)!;
+            dialog.Icon = icon;
+            var logicalSize = dialog.ClientSize;
+            if (preview.Type == "TimeSearchDialog")
+            {
+                ((DateTimePicker)type.GetField("_date", flags)!.GetValue(dialog)!).Value = new DateTime(2026, 10, 14);
+                ((DateTimePicker)type.GetField("_time", flags)!.GetValue(dialog)!).Value = new DateTime(2026, 10, 14, 20, 42, 32);
+            }
+            dialog.StartPosition = FormStartPosition.Manual; dialog.Location = new Point(-20000, -20000);
+            dialog.Show(); ApplyPreviewDpi(dialog, dpi); SetLogicalClientSize(dialog, logicalSize);
+            SaveSnapshot(dialog, Path.Combine(output, preview.File));
+        }
+    }
+
+    private static void SetLogicalClientSize(Form form, Size size)
+    {
+        form.ClientSize = new Size(size.Width * form.DeviceDpi / 96, size.Height * form.DeviceDpi / 96);
+        LayoutTree(form); Application.DoEvents();
+    }
+
+    private static void SaveSnapshot(Form form, string file)
+    {
+        if (form is MainForm) typeof(MainForm).GetMethod("CompletePageTransition", BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(form, null);
+        LayoutTree(form); Application.DoEvents();
+        bool clientOnly = form.DeviceDpi != 96;
+        using var bitmap = new Bitmap(clientOnly ? form.ClientSize.Width : form.Width, clientOnly ? form.ClientSize.Height : form.Height);
+        if (clientOnly)
+        {
+            // A simulated DPI event cannot change the host's physical window limits or bitmap DC.
+            // Draw the full logical client tree for geometry checks without cropped native chrome.
+            using (var graphics = Graphics.FromImage(bitmap)) graphics.Clear(form.BackColor);
+            foreach (Control control in form.Controls.Cast<Control>().Reverse()) control.DrawToBitmap(bitmap, control.Bounds);
+        }
+        else form.DrawToBitmap(bitmap, new Rectangle(Point.Empty, form.Size));
+        bitmap.Save(file, ImageFormat.Png);
+        Console.WriteLine(file);
+    }
+
+    private static void ApplyPreviewDpi(Form form, int dpi)
+    {
+        if (form.DeviceDpi == dpi) return;
+        // Exercise WinForms' DPI-change path without moving a real application onto a user's monitor.
+        double ratio = dpi / (double)form.DeviceDpi;
+        var suggested = new NativeRect { Left = -20000, Top = -20000, Right = -20000 + (int)Math.Ceiling(form.Width * ratio), Bottom = -20000 + (int)Math.Ceiling(form.Height * ratio) };
+        nint rectangle = Marshal.AllocHGlobal(Marshal.SizeOf<NativeRect>());
+        try
+        {
+            Marshal.StructureToPtr(suggested, rectangle, false);
+            SendMessage(form.Handle, 0x02E0, (nint)((dpi << 16) | dpi), rectangle);
+            form.PerformLayout(); Application.DoEvents();
+            if (form.DeviceDpi != dpi) throw new InvalidOperationException($"The preview DPI event was not applied: {form.DeviceDpi} instead of {dpi}.");
+        }
+        finally { Marshal.FreeHGlobal(rectangle); }
+    }
+
+    private static void LayoutTree(Control control)
+    {
+        control.PerformLayout();
+        foreach (Control child in control.Controls) LayoutTree(child);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect { public int Left, Top, Right, Bottom; }
+    [DllImport("user32.dll")]
+    private static extern nint SendMessage(nint window, uint message, nint wParam, nint lParam);
+
     private static void RunUiChecks(MainForm form, PreviewController controller)
     {
         int checks = 0;
         const BindingFlags flags = BindingFlags.NonPublic | BindingFlags.Instance;
+        // Application.DoEvents does not keep the UI synchronization context installed as Application.Run does.
+        // Reflection actions stand in for real UI events, so their awaits must resume on the same UI thread.
+        var previousContext = SynchronizationContext.Current;
+        using var uiContext = new WindowsFormsSynchronizationContext();
+        SynchronizationContext.SetSynchronizationContext(uiContext);
         T Field<T>(string name) where T : class => (T)typeof(MainForm).GetField(name, flags)!.GetValue(form)!;
-        object? Call(string name, params object[] args) => typeof(MainForm).GetMethod(name, flags)!.Invoke(form, args);
+        object? Call(string name, params object[] args)
+        {
+            SynchronizationContext.SetSynchronizationContext(uiContext);
+            return typeof(MainForm).GetMethod(name, flags)!.Invoke(form, args);
+        }
         void Check(bool result, string description) { if (!result) throw new InvalidOperationException("UI check failed: " + description); checks++; }
         controller.Recording = false; Call("ShowPage", 2);
         var grid = Field<DataGridView>("_recordings");
@@ -205,7 +322,7 @@ internal static class Program
         Check(controller.StopRequests == 1 && controller.StartRequests == 1, "repeated toggle cannot issue another stop or start while stopping");
         controller.CompleteHeldStop(); deadline = DateTime.UtcNow.AddSeconds(5);
         while ((!delayedStart.IsCompleted || !delayedStop.IsCompleted) && DateTime.UtcNow < deadline) { Application.DoEvents(); Thread.Sleep(10); }
-        Check(delayedStart.IsCompletedSuccessfully && delayedStop.IsCompletedSuccessfully && Field<Button>("_toggle").Enabled && Field<Button>("_toggle").Text.Contains("starten"), "cancelled startup returns to idle without an error dialog");
+        Check(delayedStart.IsCompletedSuccessfully && delayedStop.IsCompletedSuccessfully && Field<Button>("_toggle").Enabled && Field<Button>("_toggle").Text.Contains("starten"), $"cancelled startup returns to idle without an error dialog (start {delayedStart.Status}; stop {delayedStop.Status}; button {Field<Button>("_toggle").Enabled}: {Field<Button>("_toggle").Text})");
         Call("LoadSettings"); Call("RefreshDashboard");
         Check(!Field<CheckBox>("_microphoneEnabled").Checked && !Field<ComboBox>("_microphone").Enabled, "microphone remains an explicit opt-in by default");
         Check(!Field<Button>("_testMicrophone").Enabled, "microphone test is disabled until microphone is explicitly enabled");
@@ -272,7 +389,56 @@ internal static class Program
         Call("ShowPage", 2); controller.ArchiveOverride = Enumerable.Range(0, 750).Select(i => new RecordingInfo($"record-{i:0000}.mkv", DateTime.UtcNow.AddMinutes(-i), i * 1024L, false, false)).ToArray(); Call("RefreshRecordings", true); var target = controller.ArchiveOverride[605]; Call("SelectArchiveRecording", target);
         Check(Field<Label>("_archivePageLabel").Text.StartsWith("Seite 4") && grid.SelectedRows.Count == 1 && ((RecordingInfo)grid.SelectedRows[0].Tag!).Path == target.Path, "time search can reveal and select a match beyond the first archive page");
         Check(Field<Button>("_bookmarksSelected").Enabled, "single archive selection exposes saved moments");
+        // Native control animations must stop promptly and never turn idle screens into a render loop.
+        Call("SetMotionEnabled", true); Call("CompletePageTransition");
+        var pageTimer = Field<System.Windows.Forms.Timer>("_pageMotionTimer");
+        int MotionFrames() => (int)typeof(MainForm).GetField("_motionFrameCount", flags)!.GetValue(form)!;
+        void PumpFor(int milliseconds)
+        {
+            var until = System.Diagnostics.Stopwatch.StartNew();
+            while (until.ElapsedMilliseconds < milliseconds) { Application.DoEvents(); Thread.Sleep(5); }
+        }
+        Check(!pageTimer.Enabled && Field<Panel>("_content").Padding == Padding.Empty, "settled UI has no page animation timer or residual offset");
+        int frames = MotionFrames(); Call("BeginPageTransition");
+        bool systemMotion = SystemInformation.IsMenuAnimationEnabled && !SystemInformation.HighContrast;
+        Check(pageTimer.Enabled == systemMotion, "visible page transitions respect the Windows animation and high contrast preferences");
+        PumpFor(350);
+        Check(!pageTimer.Enabled && (systemMotion ? MotionFrames() > frames : MotionFrames() == frames) && Field<Panel>("_content").Padding == Padding.Empty, "page transition completes and removes its temporary offset");
+        frames = MotionFrames(); PumpFor(80);
+        Check(MotionFrames() == frames, "settled pages do not schedule further animation frames");
+        Call("BeginPageTransition"); form.Hide(); Application.DoEvents();
+        Check(!pageTimer.Enabled && Field<Panel>("_content").Padding == Padding.Empty, "hiding the window immediately stops animation and resets layout");
+        frames = MotionFrames(); Call("BeginPageTransition"); PumpFor(40);
+        Check(!pageTimer.Enabled && MotionFrames() == frames, "hidden windows never begin a transition");
+        form.Show(); Call("SetMotionEnabled", false); Call("BeginPageTransition");
+        Check(!pageTimer.Enabled && Field<Panel>("_content").Padding == Padding.Empty, "disabled motion keeps navigation immediate and timer-free");
+        Call("SetMotionEnabled", true);
+        for (int i = 0; i < 40; i++) Call("ShowPage", i % 4);
+        Call("CompletePageTransition"); Application.DoEvents();
+        Check(Field<Panel>("_toolsPage").Visible && !Field<Panel>("_dashboard").Visible && !Field<Panel>("_settingsPage").Visible && !Field<Panel>("_recordingsPage").Visible, "rapid page navigation leaves exactly the final page visible");
+        Check(!pageTimer.Enabled && Field<Panel>("_content").Padding == Padding.Empty, "rapid navigation does not retain queued animation or a shifted page");
+        Call("ShowPage", 2); Call("CompletePageTransition"); form.PerformLayout(); Application.DoEvents();
+        Check(grid.ClientSize.Width > 500 * form.DeviceDpi / 96 && grid.ClientSize.Height > 150 * form.DeviceDpi / 96, "compact archive preserves a readable table viewport");
+        Check(grid.Columns.Cast<DataGridViewColumn>().Where(column => column.Visible).All(column => column.Width >= column.MinimumWidth), "archive columns respect their readable minimum widths");
+        Check(Field<TextBox>("_search").Width >= 140 * form.DeviceDpi / 96 && Field<ComboBox>("_dateFilter").Height > 0, "compact archive retains a usable search and date filter");
+        Call("ShowPage", 0); Call("CompletePageTransition"); form.PerformLayout(); Application.DoEvents();
+        Check(!Field<Panel>("_dashboard").VerticalScroll.Visible, "compact dashboard presents its controls and metrics without a page scrollbar");
+        Check(new[] { "_toggle", "_pause", "_protect", "_bookmark" }.Select(Field<Button>).All(button => button.Parent!.ClientRectangle.Contains(button.Bounds)), "all four dashboard capture actions stay inside their compact viewport");
+        var hoverButton = Field<Button[]>("_nav")[0];
+        var hoverType = hoverButton.GetType();
+        bool HoverRunning() => (bool)hoverType.GetProperty("AnimationRunning")!.GetValue(hoverButton)!;
+        void HoverEvent(string name) => hoverType.GetMethod(name, flags)!.Invoke(hoverButton, [EventArgs.Empty]);
+        Check(!HoverRunning(), "idle navigation buttons do not run an animation timer");
+        HoverEvent("OnMouseEnter");
+        Check(HoverRunning() == systemMotion, "button hover follows Windows motion preferences");
+        PumpFor(260); Check(!HoverRunning(), "button hover stops once its finite highlight transition completes");
+        HoverEvent("OnMouseLeave"); form.Hide(); Application.DoEvents();
+        Check(!HoverRunning(), "hiding the window also stops button hover timers");
+        form.Show(); Call("SetMotionEnabled", false); HoverEvent("OnMouseEnter");
+        Check(!HoverRunning(), "motion disabled also prevents animated button hovers");
+        Call("SetMotionEnabled", false);
         Console.WriteLine($"UI checks passed: {checks}");
+        SynchronizationContext.SetSynchronizationContext(previousContext);
     }
 }
 

@@ -1,5 +1,16 @@
 # ScreenDash – Prüfergebnis
 
+## Version 1.4.1 – 14. Oktober 2026
+
+- 102 Oberfläche-/Animationsprüfungen mit künstlichen Daten bestanden: bisherige Aufnahme-, Archiv-, Profil-, Audio- und Updatebedienung sowie begrenzte Hover-/Seitenübergänge, keine Animationstimer im Leerlauf, sofortiges Beenden beim Verstecken, abgeschaltete Bewegung, schnelle Navigation und vollständig sichtbare Aufnahmebuttons im kompakten Dashboard.
+- 28 Ansichten mit Beispieldaten bei 96 DPI gerendert und visuell geprüft: normale, kompakte, große und minimale Fenster, Einstellungen, Werkzeuge und vier Feature-Dialoge. Texte und Statuszahlen sind vollständig lesbar; das Dashboard passt bei 1024 × 720 ohne vertikales Scrollen.
+- Zusätzliche Layoutsimulationen mit DPI-Ereignissen für 144 und 192 DPI gerendert. Sie prüfen Fenstergeometrie und Layoutanpassung, ersetzen jedoch keinen physischen Monitorwechsel oder echten Windows-Skalierungstest. Die Anwendung verwendet PerMonitorV2.
+- Die kurzen Animationen laufen nur bei Bedienung: ungefähr 160 ms für Hover und 190 ms beim Seitenwechsel. Danach werden ihre Timer beendet. Die Anwendung erzeugt dafür keine Video- oder Bitmap-Vorschau; Windows-Animationspräferenz und hoher Kontrast werden berücksichtigt.
+- Stifte, Pinsel, Pfade und Windows-Zeichenkontexte auf Ressourcenfreigabe geprüft. Tastaturbedienung und Fokusrahmen bleiben erhalten.
+- Die bestehenden 177 Funktionsprüfungen sind weiterhin Bestandteil des Builds. Zusätzlich läuft die Oberflächeprüfung jetzt in GitHub Actions; damit umfasst der vollständige Build 279 Prüfungen ohne reale Aufnahme.
+
+Aufnahme, Audio, Dateiformat, Speicherregeln und Hardware-Encoding wurden in dieser Gestaltungsversion nicht geändert. Kein neuer isolierter Spiele-/GPU-Benchmark. Alle sichtbaren Auslastungswerte in den Vorschauen sind künstliche Beispieldaten.
+
 ## Version 1.4 – 14. Oktober 2026
 
 - Die automatische Suite umfasst 177 Prüfungen ohne Aufnahme: 45 Speicher-/Einstellungs-/Lesezeichentests, 25 Zustands-/Planungsprüfungen, 32 Prozess-/Medienprüfungen, 7 Controller-Ablaufprüfungen, 34 Profil-/Spielerkennungs-/Updateprüfungen, 16 Audiopuffer-/Fehlerprüfungen und 18 Controller-Funktionsprüfungen. Alle Teilprüfungen bestanden lokal. Der letzte Speichertestlauf bestand vollständig mit 45/45, einschließlich der zuvor durch die Sandbox blockierten NTFS-Junction-Prüfungen.

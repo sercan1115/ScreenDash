@@ -18,11 +18,13 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Audiopuffer- und Mikrofontests fehlgeschlagen.' }
     & $Dotnet run --project ScreenDash.ControllerCheck\ScreenDash.ControllerCheck.csproj -c Release -- --feature-checks
     if ($LASTEXITCODE -ne 0) { throw 'Funktions-Controller-Tests fehlgeschlagen.' }
+    & $Dotnet run --project ScreenDash.Preview\ScreenDash.Preview.csproj -c Release -- work\ui-checks --checks-only
+    if ($LASTEXITCODE -ne 0) { throw 'Oberflächen- und Animationsprüfungen fehlgeschlagen.' }
     & $Dotnet publish ScreenDash\ScreenDash.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:DebugSymbols=false -o dist
     if ($LASTEXITCODE -ne 0) { throw 'Build fehlgeschlagen.' }
     Copy-Item -LiteralPath README.de.md -Destination dist\README.de.md
     if (Test-Path LICENSE) { Copy-Item -LiteralPath LICENSE -Destination dist\LICENSE }
-    if (Test-Path NEU-IN-1.4.de.md) { Copy-Item -LiteralPath NEU-IN-1.4.de.md -Destination dist\NEU-IN-1.4.de.md }
+    if (Test-Path NEU-IN-1.4.1.de.md) { Copy-Item -LiteralPath NEU-IN-1.4.1.de.md -Destination dist\NEU-IN-1.4.1.de.md }
     if (Test-Path TESTBERICHT.de.md) { Copy-Item -LiteralPath TESTBERICHT.de.md -Destination dist\TESTBERICHT.de.md }
     if (Test-Path Drittanbieter-Lizenzen.txt) { Copy-Item -LiteralPath Drittanbieter-Lizenzen.txt -Destination dist\Drittanbieter-Lizenzen.txt }
     Write-Output 'Fertig: dist\ScreenDash.exe'

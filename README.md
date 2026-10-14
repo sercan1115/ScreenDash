@@ -2,7 +2,7 @@
 
 Eine lokale Bildschirm-Dashcam für **Windows 10/11 (64 Bit)**. ScreenDash zeichnet einen ausgewählten Monitor mit Systemton auf, speichert eine durchgehende Datei je Aufnahme und räumt alte Aufnahmen automatisch auf.
 
-**[Windows-Version herunterladen](https://github.com/sercan1115/ScreenDash/releases/latest)** · [Anleitung](README.de.md) · [Neuerungen in 1.4](NEU-IN-1.4.de.md)
+**[Windows-Version herunterladen](https://github.com/sercan1115/ScreenDash/releases/latest)** · [Anleitung](README.de.md) · [Neuerungen in 1.4.1](NEU-IN-1.4.1.de.md)
 
 ![ScreenDash – Aufnahmeübersicht mit Beispieldaten](docs/screenshots/dashboard.png)
 
@@ -10,6 +10,7 @@ Die Bilder zeigen die Oberfläche mit Beispieldaten. Ihre Auslastungsanzeigen si
 
 ## Funktionen
 
+- **Neues Design:** dunkle Indigo-Flächen mit Mint-Akzent, klare Vektorsymbole und Statuschips. Kurze Hover- und Seitenübergänge; Animationstimer ruhen im Leerlauf und beim Verstecken der App.
 - **Lesezeichen:** während der Aufnahme Momente markieren, die ganze Datei schützen und später Clips davor/danach exportieren.
 - **Spielerkennung:** bei ausgewählten Spielen automatisch starten/stoppen; manuelles Stoppen wird respektiert. Anfangs ausgeschaltet.
 - **Aufnahmeprofile:** eigene Bildschirm-/Audio-/Qualitätseinstellungen speichern, ohne Speicherregeln oder Autostart zu verändern.
@@ -77,7 +78,7 @@ cd ScreenDash
 .\build.ps1
 ```
 
-Das Skript führt 177 Prüfungen für Speicher, Lesezeichen, Zustände, Medien, Audio, Spielerkennung, Profile und Updates ohne Aufnahme aus und baut die portable App nach `dist`. GitHub Actions führt dieselben Tests auf Windows aus und erzeugt ein Build-Artefakt. Die Windows-Version steht in den Releases.
+Das Skript führt 177 Prüfungen für Speicher, Lesezeichen, Zustände, Medien, Audio, Spielerkennung, Profile und Updates sowie 102 Oberfläche-/Animationsprüfungen mit künstlichen Daten aus und baut die portable App nach `dist`. GitHub Actions führt dieselben Tests auf Windows aus und erzeugt ein Build-Artefakt. Die Windows-Version steht in den Releases.
 
 Zusätzliche Integrationstests benötigen einen interaktiven Windows-Desktop, einen Monitor, FFmpeg und gegebenenfalls ein Audiogerät. Sie zeichnen echte Bildschirminhalte auf und sind daher kein Bestandteil des CI-Laufs. Hinweise und Ergebnisse: [Testbericht](TESTBERICHT.de.md).
 

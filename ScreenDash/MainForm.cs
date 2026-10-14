@@ -6,8 +6,8 @@ namespace ScreenDash;
 
 public sealed partial class MainForm : Form
 {
-    private static readonly Color Canvas = Color.FromArgb(17, 22, 31), Sidebar = Color.FromArgb(12, 17, 25), Card = Color.FromArgb(25, 32, 44), Input = Color.FromArgb(33, 42, 57);
-    private static readonly Color Ink = Color.FromArgb(238, 243, 250), Muted = Color.FromArgb(155, 170, 192), Cyan = Color.FromArgb(90, 216, 239), Violet = Color.FromArgb(168, 151, 242), Line = Color.FromArgb(46, 57, 75), Amber = Color.FromArgb(243, 190, 111);
+    private static readonly Color Canvas = Color.FromArgb(16, 19, 29), Sidebar = Color.FromArgb(11, 14, 22), Card = Color.FromArgb(24, 30, 43), Input = Color.FromArgb(32, 40, 56);
+    private static readonly Color Ink = Color.FromArgb(242, 245, 252), Muted = Color.FromArgb(167, 180, 204), Cyan = Color.FromArgb(106, 228, 216), Violet = Color.FromArgb(177, 161, 250), Line = Color.FromArgb(48, 59, 80), Amber = Color.FromArgb(243, 190, 111);
     private readonly IAppController _controller;
     private readonly bool _startMinimized;
     private readonly bool _enableHotkeys;
@@ -18,7 +18,7 @@ public sealed partial class MainForm : Form
     private readonly Panel _content = new() { Dock = DockStyle.Fill, Margin = Padding.Empty }, _dashboard = new() { Dock = DockStyle.Fill }, _settingsPage = new() { Dock = DockStyle.Fill }, _recordingsPage = new() { Dock = DockStyle.Fill };
     private readonly Button[] _nav = new Button[4], _settingNav = new Button[4];
     private readonly Panel[] _settingTabs = new Panel[4];
-    private readonly Label _pageTitle = TextLabel("Aufnahme", 25, Ink, FontStyle.Bold), _pageSubtitle = TextLabel("Dein Bildschirm. Als sicherer Rückblick.", 10, Muted), _headerState = TextLabel("●  BEREIT", 9, Cyan, FontStyle.Bold);
+    private readonly Label _pageTitle = TextLabel("Aufnahme", 27, Ink, FontStyle.Bold), _pageSubtitle = TextLabel("Dein Bildschirm. Als sicherer Rückblick.", 10, Muted), _headerState = new StatusPill { Text = "BEREIT", Dock = DockStyle.Fill, ForeColor = Cyan, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold), Margin = new Padding(0, 6, 0, 6) };
     private readonly Label _recordingState = TextLabel("Bereit für deinen Rückblick", 22, Ink, FontStyle.Bold), _recordingMessage = TextLabel("", 10, Muted), _elapsed = TextLabel("00:00:00", 28, Ink, FontStyle.Bold), _source = TextLabel("", 10, Muted);
     private readonly Label _encoder = TextLabel("GPU bevorzugt", 16, Ink, FontStyle.Bold), _cpu = TextLabel("0,0 %", 24, Ink, FontStyle.Bold), _memory = TextLabel("0 MB", 24, Ink, FontStyle.Bold), _fps = TextLabel("15 FPS", 24, Ink, FontStyle.Bold);
     private readonly Label _storage = TextLabel("Speicher wird geprüft …", 14, Ink, FontStyle.Bold), _storageDetail = TextLabel("", 9, Muted), _storageEstimate = TextLabel("", 10, Cyan);
@@ -57,7 +57,7 @@ public sealed partial class MainForm : Form
     public MainForm(IAppController controller, bool startMinimized = false, bool enableHotkeys = true)
     {
         _controller = controller; _startMinimized = startMinimized; _enableHotkeys = enableHotkeys;
-        Text = "ScreenDash 1.4 · Bildschirm-Dashcam"; StartPosition = FormStartPosition.CenterScreen;
+        Text = "ScreenDash 1.4.1 · Bildschirm-Dashcam"; StartPosition = FormStartPosition.CenterScreen;
         ClientSize = new Size(1180, 780); MinimumSize = new Size(980, 660); AutoScaleMode = AutoScaleMode.Dpi;
         BackColor = Canvas; ForeColor = Ink; Font = new Font("Segoe UI", 10); DoubleBuffered = true;
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application; } catch { Icon = SystemIcons.Application; }
@@ -72,57 +72,10 @@ public sealed partial class MainForm : Form
         _tray = new NotifyIcon { Text = "ScreenDash · bereit", Icon = Icon, Visible = true, ContextMenuStrip = _trayMenu }; _tray.DoubleClick += (_, _) => ShowWindow();
         BuildShell(); BuildDashboard(); BuildSettings(); BuildRecordings(); BuildTools(); TrackSettingsChanges();
         _content.Controls.AddRange([_dashboard, _settingsPage, _recordingsPage, _toolsPage]); ShowPage(0); LoadSettings(); RefreshDashboard();
+        InitializeMotion();
         _controller.Changed += ControllerChanged; _controller.Notice += ControllerNotice; FormClosing += HandleFormClosing;
         Resize += (_, _) => { if (WindowState == FormWindowState.Minimized) Hide(); };
         Shown += (_, _) => { FitWorkingArea(); if (_startMinimized) BeginInvoke((Action)Hide); };
-    }
-
-    private void BuildShell()
-    {
-        var shell = Grid(2, 1); shell.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 198)); shell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); shell.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); Controls.Add(shell);
-        var sidebar = new Panel { Dock = DockStyle.Fill, BackColor = Sidebar, Padding = new Padding(18, 24, 18, 22), Margin = Padding.Empty };
-        var sidebarGrid = Grid(1, 4); sidebarGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 118)); sidebarGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 234)); sidebarGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); sidebarGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 142)); sidebar.Controls.Add(sidebarGrid);
-        var brand = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty }; brand.Controls.Add(new BrandMark { Location = new Point(0, 0), Size = new Size(36, 36) });
-        var name = TextLabel("ScreenDash", 17, Ink, FontStyle.Bold); name.Dock = DockStyle.None; name.SetBounds(0, 46, 166, 32); brand.Controls.Add(name);
-        var tagline = TextLabel("DEINE BILDSCHIRM-DASHCAM", 7.5f, Muted, FontStyle.Bold); tagline.Dock = DockStyle.None; tagline.SetBounds(0, 81, 166, 20); brand.Controls.Add(tagline); sidebarGrid.Controls.Add(brand, 0, 0);
-        var nav = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = Padding.Empty };
-        string[] titles = ["◉   Aufnahme", "▤   Aufnahmen", "⚙   Einstellungen", "✦   Werkzeuge"]; int[] pages = [0, 2, 1, 3];
-        for (int i = 0; i < titles.Length; i++) { int page = pages[i]; var button = ActionButton(titles[i]); button.Size = new Size(162, 47); button.Margin = new Padding(0, 0, 0, 9); ((ThemeButton)button).LeftAligned = true; button.Click += (_, _) => ShowPage(page); _nav[page] = button; nav.Controls.Add(button); }
-        sidebarGrid.Controls.Add(nav, 0, 1);
-        var bottom = Grid(1, 4); bottom.RowStyles.Add(new RowStyle(SizeType.Absolute, 38)); bottom.RowStyles.Add(new RowStyle(SizeType.Absolute, 34)); bottom.RowStyles.Add(new RowStyle(SizeType.Absolute, 34)); bottom.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        var folder = ActionButton("Ordner öffnen  ↗"); folder.Dock = DockStyle.Fill; folder.Margin = new Padding(0, 0, 0, 5); folder.Font = new Font("Segoe UI", 9); folder.Click += (_, _) => RunSync(_controller.OpenRecordingFolder); bottom.Controls.Add(folder, 0, 0);
-        var logs = ActionButton("Diagnose  ↗"); logs.Dock = DockStyle.Fill; logs.Margin = new Padding(0, 0, 0, 5); logs.Font = new Font("Segoe UI", 9); logs.Click += (_, _) => RunSync(_controller.OpenLogs); bottom.Controls.Add(logs, 0, 1);
-        bottom.Controls.Add(TextLabel("●  Lokal gespeichert", 9, Cyan), 0, 2); bottom.Controls.Add(TextLabel("Version 1.4  ·  Windows", 8, Muted), 0, 3); sidebarGrid.Controls.Add(bottom, 0, 3); shell.Controls.Add(sidebar, 0, 0);
-        var main = Grid(1, 3); main.Padding = new Padding(28, 22, 28, 12); main.RowStyles.Add(new RowStyle(SizeType.Absolute, 83)); main.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); main.RowStyles.Add(new RowStyle(SizeType.Absolute, 29));
-        var header = Grid(2, 2); header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 172)); header.RowStyles.Add(new RowStyle(SizeType.Absolute, 42)); header.RowStyles.Add(new RowStyle(SizeType.Absolute, 26));
-        header.Controls.Add(_pageTitle, 0, 0); header.Controls.Add(_pageSubtitle, 0, 1); _headerState.TextAlign = ContentAlignment.MiddleRight; header.Controls.Add(_headerState, 1, 0); header.Controls.Add(TextLabel("Strg + Alt + F8 · Start / Stopp", 8, Muted), 1, 1);
-        main.Controls.Add(header, 0, 0); main.Controls.Add(_content, 0, 1); main.Controls.Add(_footer, 0, 2); shell.Controls.Add(main, 1, 0);
-    }
-
-    private void BuildDashboard()
-    {
-        var grid = Grid(1, 4); grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 275)); grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 118)); grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 159)); grid.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        _dashboard.AutoScroll = true; grid.Dock = DockStyle.Top; grid.Height = 570; _dashboard.Controls.Add(grid);
-        _dashboard.SizeChanged += (_, _) =>
-        {
-            int minimumHeight = 600 * DeviceDpi / 96;
-            _dashboard.AutoScroll = _dashboard.ClientSize.Height < minimumHeight;
-            grid.Height = Math.Max(minimumHeight, _dashboard.ClientSize.Height);
-            _dashboard.AutoScrollMinSize = new Size(0, minimumHeight);
-        };
-        var hero = Surface(new Padding(23, 17, 23, 20)); var heroGrid = Grid(2, 6); heroGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 74)); heroGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 26));
-        heroGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 25)); heroGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 43)); heroGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 41)); heroGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 29)); heroGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 22)); heroGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        heroGrid.Controls.Add(TextLabel("DEIN LAUFENDER RÜCKBLICK", 8, Cyan, FontStyle.Bold), 0, 0); var timerHeading = TextLabel("SITZUNGSDAUER", 8, Muted, FontStyle.Bold); timerHeading.TextAlign = ContentAlignment.MiddleRight; heroGrid.Controls.Add(timerHeading, 1, 0);
-        heroGrid.Controls.Add(_recordingState, 0, 1); _elapsed.TextAlign = ContentAlignment.MiddleRight; heroGrid.Controls.Add(_elapsed, 1, 1); heroGrid.Controls.Add(_recordingMessage, 0, 2); heroGrid.SetColumnSpan(_recordingMessage, 2); heroGrid.Controls.Add(_source, 0, 3); heroGrid.SetColumnSpan(_source, 2); heroGrid.Controls.Add(_sound, 0, 4); _autoStopCountdown.TextAlign = ContentAlignment.MiddleRight; heroGrid.Controls.Add(_autoStopCountdown, 1, 4);
-        var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, Margin = Padding.Empty, WrapContents = false, Padding = new Padding(0, 7, 0, 0) }; _toggle.Size = new Size(191, 43); _pause.Size = new Size(107, 43); _protect.Size = new Size(188, 43); _bookmark.Size = new Size(144, 43);
-        _toggle.Click += async (_, _) => await ToggleRecordingActionAsync(); _pause.Click += async (_, _) => await RunActionAsync(TogglePauseAsync); _protect.Click += async (_, _) => await RunActionAsync(_controller.ProtectRecentAsync); _bookmark.Click += async (_, _) => await AddBookmarkAsync(); actions.Controls.AddRange([_toggle, _pause, _protect, _bookmark]); heroGrid.Controls.Add(actions, 0, 5); heroGrid.SetColumnSpan(actions, 2); hero.Controls.Add(heroGrid); grid.Controls.Add(hero, 0, 0);
-        _tips.SetToolTip(_toggle, "Aufnahme starten oder Sitzung vollständig stoppen · Strg + Alt + F8"); _tips.SetToolTip(_pause, "Manuell pausieren und fortsetzen · Strg + Alt + F10"); _tips.SetToolTip(_protect, "Wichtige Abschnitte vor der automatischen Löschung schützen · Strg + Alt + F9");
-        var metrics = Grid(4, 1); for (int i = 0; i < 4; i++) metrics.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25)); metrics.Controls.Add(Metric("KODIERUNG", _encoder, "H.264 · Hardware bevorzugt", false), 0, 0); metrics.Controls.Add(Metric("CPU-AUSLASTUNG", _cpu, "Programm + Encoder", false), 1, 0); metrics.Controls.Add(Metric("ARBEITSSPEICHER", _memory, "Programm + Encoder", false), 2, 0); metrics.Controls.Add(Metric("BILDRATE", _fps, "Bilder pro Sekunde", true), 3, 0); grid.Controls.Add(metrics, 0, 1);
-        var storage = Surface(new Padding(23, 12, 23, 12)); var storageGrid = Grid(1, 5); storageGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 22)); storageGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 31)); storageGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 15)); storageGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 28)); storageGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        storageGrid.Controls.Add(TextLabel("SPEICHER & AUFBEWAHRUNG", 8, Muted, FontStyle.Bold), 0, 0); storageGrid.Controls.Add(_storage, 0, 1); storageGrid.Controls.Add(_storageMeter, 0, 2); storageGrid.Controls.Add(_storageDetail, 0, 3); storageGrid.Controls.Add(_storageEstimate, 0, 4); storage.Controls.Add(storageGrid); grid.Controls.Add(storage, 0, 2);
-        var shortcuts = Grid(2, 1); shortcuts.Padding = new Padding(2, 4, 2, 4); shortcuts.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 66)); shortcuts.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 34));
-        var help = TextLabel("Wichtiger Moment? Sichere die letzten Minuten.\nGesicherte Abschnitte bleiben von der automatischen Löschung ausgenommen.", 9, Muted); help.TextAlign = ContentAlignment.TopLeft; shortcuts.Controls.Add(help, 0, 0);
-        var keyHints = TextLabel("Strg + Alt + F9   Sichern\nF10   Pause    ·    F11   Lesezeichen", 9, Muted); keyHints.TextAlign = ContentAlignment.TopRight; shortcuts.Controls.Add(keyHints, 1, 0); grid.Controls.Add(shortcuts, 0, 3); _tips.SetToolTip(_bookmark, "Diesen Moment als Lesezeichen markieren · Strg + Alt + F11. Markiert den Moment und schützt die gesamte Datei vor der automatischen Löschung.");
     }
 
     private void BuildSettings()
@@ -149,11 +102,11 @@ public sealed partial class MainForm : Form
     private void BuildRecordings()
     {
         var page = Grid(1, 6); page.RowStyles.Add(new RowStyle(SizeType.Absolute, 45)); page.RowStyles.Add(new RowStyle(SizeType.Absolute, 37)); page.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); page.RowStyles.Add(new RowStyle(SizeType.Absolute, 38)); page.RowStyles.Add(new RowStyle(SizeType.Absolute, 57)); page.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
-        var filters = Grid(4, 1); filters.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); filters.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 155)); filters.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 165)); filters.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 111)); _search.PlaceholderText = "Suchen · Strg + F"; _search.AccessibleName = "Aufnahmen durchsuchen"; _search.Margin = new Padding(0, 0, 10, 10); _archiveFilter.Items.AddRange(["Alle Aufnahmen", "Nur gesicherte", "Nur ungesicherte"]); _dateFilter.Items.AddRange(["Gesamter Zeitraum", "Letzte 24 Stunden", "Letzte 7 Tage"]); _archiveFilter.Margin = new Padding(0, 0, 10, 10); _dateFilter.Margin = new Padding(0, 0, 10, 10); _archiveFilter.SelectedIndex = 0; _dateFilter.SelectedIndex = 0;
+        var filters = Grid(4, 1); filters.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); filters.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 155)); filters.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 165)); filters.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 111)); _search.PlaceholderText = "Suchen · Strg + F"; _search.AccessibleName = "Aufnahmen durchsuchen"; _search.Margin = new Padding(0, 0, 10, 10); _archiveFilter.Items.AddRange(["Alle Aufnahmen", "Nur gesicherte", "Nur ungesicherte"]); _dateFilter.Items.AddRange(["Alle Zeiten", "24 Stunden", "7 Tage"]); _archiveFilter.Margin = new Padding(0, 0, 10, 10); _dateFilter.Margin = new Padding(0, 0, 10, 10); _archiveFilter.SelectedIndex = 0; _dateFilter.SelectedIndex = 0;
         filters.Controls.Add(_search, 0, 0); filters.Controls.Add(_archiveFilter, 1, 0); filters.Controls.Add(_dateFilter, 2, 0); _clearFilters.Dock = DockStyle.Fill; _clearFilters.Margin = new Padding(0, 0, 0, 10); _clearFilters.Font = new Font("Segoe UI", 8.5f); _clearFilters.Click += (_, _) => ResetArchiveFilters(); filters.Controls.Add(_clearFilters, 3, 0); _search.TextChanged += (_, _) => ResetArchivePage(); _archiveFilter.SelectedIndexChanged += (_, _) => ResetArchivePage(); _dateFilter.SelectedIndexChanged += (_, _) => ResetArchivePage(); page.Controls.Add(filters, 0, 0);
         var summary = Grid(4, 1); summary.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); summary.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 112)); summary.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 123)); summary.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 118)); summary.Controls.Add(_recordingsSummary, 0, 0); var refresh = ActionButton("Aktualisieren"); refresh.Font = new Font("Segoe UI", 9); refresh.Dock = DockStyle.Fill; refresh.Margin = new Padding(0, 0, 0, 7); refresh.Click += (_, _) => RefreshRecordings(); _findTime.Dock = _bookmarksSelected.Dock = DockStyle.Fill; _findTime.Font = _bookmarksSelected.Font = new Font("Segoe UI", 8.5f); _findTime.Margin = _bookmarksSelected.Margin = new Padding(0, 0, 7, 7); _findTime.Click += async (_, _) => await FindTimeAsync(); _bookmarksSelected.Click += async (_, _) => await ShowBookmarksAsync(); summary.Controls.Add(_findTime, 1, 0); summary.Controls.Add(_bookmarksSelected, 2, 0); summary.Controls.Add(refresh, 3, 0); page.Controls.Add(summary, 0, 1);
         _recordings.Dock = DockStyle.Fill; _recordings.BackgroundColor = Card; _recordings.BorderStyle = BorderStyle.None; _recordings.AllowUserToAddRows = false; _recordings.AllowUserToDeleteRows = false; _recordings.AllowUserToResizeRows = false; _recordings.RowHeadersVisible = false; _recordings.ReadOnly = true; _recordings.MultiSelect = true; _recordings.SelectionMode = DataGridViewSelectionMode.FullRowSelect; _recordings.AutoGenerateColumns = false; _recordings.EnableHeadersVisualStyles = false; _recordings.ColumnHeadersHeight = 42; _recordings.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing; _recordings.GridColor = Line; _recordings.RowTemplate.Height = 47;
-        _recordings.DefaultCellStyle = new DataGridViewCellStyle { BackColor = Card, ForeColor = Ink, SelectionBackColor = Color.FromArgb(37, 67, 83), SelectionForeColor = Ink, Padding = new Padding(10, 0, 0, 0), Font = new Font("Segoe UI", 9.5f) }; _recordings.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(22, 29, 40); _recordings.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle { BackColor = Input, ForeColor = Muted, SelectionBackColor = Input, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold), Padding = new Padding(10, 0, 0, 0) }; _recordings.CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal; _recordings.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.None;
+        _recordings.DefaultCellStyle = new DataGridViewCellStyle { BackColor = Card, ForeColor = Ink, SelectionBackColor = Color.FromArgb(36, 61, 66), SelectionForeColor = Ink, Padding = new Padding(10, 0, 0, 0), Font = new Font("Segoe UI", 9.5f) }; _recordings.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(21, 27, 40); _recordings.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle { BackColor = Input, ForeColor = Muted, SelectionBackColor = Input, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold), Padding = new Padding(10, 0, 0, 0) }; _recordings.CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal; _recordings.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.None;
         _recordings.Columns.Add(new DataGridViewTextBoxColumn { Name = "Time", HeaderText = "BEGINN", Width = 150 }); _recordings.Columns.Add(new DataGridViewTextBoxColumn { Name = "File", HeaderText = "AUFNAHME / NOTIZ", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill, MinimumWidth = 210 }); _recordings.Columns.Add(new DataGridViewTextBoxColumn { Name = "Size", HeaderText = "GRÖSSE", Width = 88 }); _recordings.Columns.Add(new DataGridViewTextBoxColumn { Name = "Protect", HeaderText = "SCHUTZ", Width = 110 }); _recordings.Columns.Add(new DataGridViewTextBoxColumn { Name = "State", HeaderText = "STATUS", Width = 105 });
         foreach (DataGridViewColumn column in _recordings.Columns) { column.SortMode = DataGridViewColumnSortMode.Programmatic; column.HeaderCell.ToolTipText = "Nach dieser Spalte sortieren; erneut klicken, um die Reihenfolge umzukehren."; }
         _recordings.ColumnHeaderMouseClick += (_, e) => { if (e.ColumnIndex >= 0) SortArchive(_recordings.Columns[e.ColumnIndex].Name); };
@@ -168,12 +121,17 @@ public sealed partial class MainForm : Form
 
     private void ShowPage(int page)
     {
+        bool changed = _page != page;
+        _content.SuspendLayout();
         _page = page; _dashboard.Visible = page == 0; _settingsPage.Visible = page == 1; _recordingsPage.Visible = page == 2; _toolsPage.Visible = page == 3;
         (_pageTitle.Text, _pageSubtitle.Text) = page switch { 1 => ("Einstellungen", "Passe deine Bildschirm-Dashcam an deinen Alltag an."), 2 => ("Deine Aufnahmen", "Lesezeichen finden und Momente als Clip teilen."), 3 => ("Werkzeuge", "Deine Profile, Spielerkennung und Updates an einem Ort."), _ => ("Aufnahme", "Dein Bildschirm. Als sicherer Rückblick.") };
-        for (int i = 0; i < _nav.Length; i++) SetNavigation(_nav[i], i == page); if (page == 2) RefreshRecordings(); if (page == 3) _ = ReloadProfilesAsync();
+        for (int i = 0; i < _nav.Length; i++) SetNavigation(_nav[i], i == page);
+        _content.ResumeLayout(true);
+        if (changed) BeginPageTransition();
+        if (page == 2) RefreshRecordings(); if (page == 3) _ = ReloadProfilesAsync();
     }
     private void ShowSettingTab(int tab) { for (int i = 0; i < _settingTabs.Length; i++) { _settingTabs[i].Visible = i == tab; SetNavigation(_settingNav[i], i == tab); } }
-    private static void SetNavigation(Button button, bool active) { button.BackColor = active ? Color.FromArgb(31, 57, 69) : Input; button.ForeColor = active ? Cyan : Muted; ((ThemeButton)button).AccentBorder = active; button.Invalidate(); }
+    private static void SetNavigation(Button button, bool active) { button.BackColor = active ? Color.FromArgb(27, 48, 54) : Color.FromArgb(19, 25, 37); button.ForeColor = active ? Cyan : Muted; ((ThemeButton)button).Active = active; ((ThemeButton)button).AccentBorder = active; button.Invalidate(); }
 
     private void LoadSettings()
     {
@@ -226,14 +184,14 @@ public sealed partial class MainForm : Form
     private void RefreshDashboard()
     {
         var status = _controller.Status; var s = _controller.Settings; bool busy = status.Busy || _uiBusy || _stopping || _exitInProgress; bool armed = status.Armed || status.Recording || status.Paused; bool paused = status.Paused;
-        _headerState.Text = status.Recording ? "●  AUFNAHME LÄUFT" : busy ? "●  WIRD BEARBEITET" : paused ? "●  PAUSIERT" : "●  BEREIT"; _headerState.ForeColor = status.Recording ? Cyan : paused ? Amber : Muted;
+        _headerState.Text = status.Recording ? "AUFNAHME LÄUFT" : busy ? "WIRD BEARBEITET" : paused ? "PAUSIERT" : "BEREIT"; _headerState.ForeColor = status.Recording ? Cyan : paused ? Amber : Muted;
         _recordingState.Text = status.Recording ? "Dein Rückblick läuft" : paused ? "Aufnahme pausiert" : busy ? "Einen Moment …" : "Bereit für deinen Rückblick"; _recordingMessage.Text = !string.IsNullOrWhiteSpace(status.PauseReason) && paused ? status.PauseReason : status.Message; _elapsed.Text = $"{(int)status.Elapsed.TotalHours:00}:{status.Elapsed.Minutes:00}:{status.Elapsed.Seconds:00}";
         _autoStopCountdown.Text = status.Remaining is { } remaining ? $"{(paused ? "Pausiert · " : "Stopp in ")}{FormatDuration(remaining)}" : s.AutoStopMinutes > 0 ? $"Auto-Stopp: {s.AutoStopMinutes} Min." : "Auto-Stopp aus"; _autoStopCountdown.ForeColor = status.Remaining is { TotalSeconds: <= 60 } ? Amber : Muted;
         _encoder.Text = string.IsNullOrWhiteSpace(status.Encoder) ? "GPU bevorzugt" : status.Encoder.Replace("NVIDIA ", "").Replace("Intel ", ""); _cpu.Text = $"{Math.Max(0, status.CpuPercent):0.0} %"; _memory.Text = $"{status.MemoryBytes / 1024d / 1024d:0} MB"; _fps.Text = $"{(status.Recording ? status.Fps : s.Fps):0.#} FPS";
         var display = string.IsNullOrEmpty(s.DisplayId) ? _controller.Displays.FirstOrDefault() : _controller.Displays.FirstOrDefault(d => d.Id == s.DisplayId); _source.Text = $"{display?.Name ?? "Kein Bildschirm"}   ·   {(s.AudioEnabled ? "Systemton an" : "Ohne Ton")}   ·   {(s.SingleFile ? "Eine durchgehende Datei" : $"{s.SegmentMinutes} Min. pro Abschnitt")}";
         _sound.Text = status.AudioWarning.Length > 0 ? "⚠ " + status.AudioWarning : !status.Recording ? "Tonprüfung unter Einstellungen → Quelle" : $"Spielton {(s.AudioEnabled ? $"{status.AudioPeak * 100:0} %" : "aus")}   ·   Mikrofon {(s.MicrophoneEnabled ? $"{status.MicrophonePeak * 100:0} %" : "aus")}"; _sound.ForeColor = status.AudioWarning.Length > 0 ? Amber : Cyan;
         _tips.SetToolTip(_sound, status.AudioWarning.Length > 0 ? status.AudioWarning : $"Spielton: {status.AudioDevice}\nMikrofon: {status.MicrophoneDevice}");
-        _toggle.Text = _stopping ? "■  Wird gestoppt …" : armed ? "■  Aufnahme stoppen" : "●  Aufnahme starten"; _toggle.Enabled = !_stopping && !_exitInProgress && (armed || !busy); _pause.Text = paused ? "▶  Fortsetzen" : "Ⅱ  Pause"; _pause.Enabled = !busy && armed; _protect.Text = s.SingleFile ? "◇  Aufnahme sichern" : $"◇  Letzte {s.ProtectMinutes} Min. sichern"; _tips.SetToolTip(_protect, s.SingleFile ? "Sichert die gesamte laufende Datei sowie Aufnahmen aus den letzten eingestellten Minuten." : "Sichert ganze Abschnitte aus dem gewählten Zeitraum."); _protect.Enabled = !busy;
+        _toggle.Text = _stopping ? "Wird gestoppt …" : armed ? "Aufnahme stoppen" : "Aufnahme starten"; ((ThemeButton)_toggle).IconKind = armed ? AppGlyph.Stop : AppGlyph.Record; _toggle.Enabled = !_stopping && !_exitInProgress && (armed || !busy); _pause.Text = paused ? "Fortsetzen" : "Pause"; ((ThemeButton)_pause).IconKind = paused ? AppGlyph.Play : AppGlyph.Pause; _pause.Enabled = !busy && armed; _protect.Text = s.SingleFile ? "Aufnahme sichern" : $"{s.ProtectMinutes} Min. sichern"; _tips.SetToolTip(_protect, s.SingleFile ? "Sichert die gesamte laufende Datei sowie Aufnahmen aus den letzten eingestellten Minuten." : "Sichert ganze Abschnitte aus dem gewählten Zeitraum."); _protect.Enabled = !busy;
         _trayToggle.Text = _stopping ? "Aufnahme wird gestoppt …" : armed ? "Aufnahme stoppen" : "Aufnahme starten"; _trayToggle.Enabled = _toggle.Enabled; _trayPause.Text = paused ? "Aufnahme fortsetzen" : "Aufnahme pausieren"; _trayPause.Enabled = _pause.Enabled; _trayProtect.Text = s.SingleFile ? "Aufnahme sichern" : $"Letzte {s.ProtectMinutes} Min. sichern"; _trayProtect.Enabled = !busy; _tray.Text = status.Recording ? "ScreenDash · Aufnahme läuft" : paused ? "ScreenDash · pausiert" : "ScreenDash · " + (busy ? "arbeitet" : "bereit");
         _settingsFields.Enabled = !armed && !busy; _save.Enabled = !armed && !busy && _settingsDirty; _discard.Enabled = !busy && _settingsDirty; _settingsHint.Text = armed ? "Sitzung aktiv. Stoppe die Aufnahme, um diese Einstellungen zu ändern." : _settingsDirty ? "● Ungespeicherte Änderungen · Strg + S zum Speichern" : "Einstellungen sind gespeichert."; _settingsHint.ForeColor = armed || _settingsDirty ? Amber : Muted;
         if (status.Storage is { } storage) { _storage.Text = $"{FormatBytes(storage.TotalBytes)} von {s.MaxStorageGb} GB belegt"; _storageDetail.Text = $"{FormatBytes(storage.FreeBytes)} frei auf dem Laufwerk   ·   {FormatBytes(storage.ProtectedBytes)} gesichert   ·   {s.MinFreeSpaceGb} GB Reserve"; _storageMeter.Fraction = Math.Clamp(storage.TotalBytes / (s.MaxStorageGb * 1024d * 1024d * 1024d), 0, 1); _storageMeter.ProtectedFraction = Math.Clamp(storage.ProtectedBytes / (s.MaxStorageGb * 1024d * 1024d * 1024d), 0, 1); _storageMeter.Warning = !storage.CanRecord; var estimate = RecordingEstimates.Calculate(s, storage.ProtectedBytes, storage.FreeBytes); _storageEstimate.Text = !storage.CanRecord ? storage.Message : $"Ungesicherte Aufnahmen: max. {s.RetentionDays} Tage   ·   Bei Daueraufnahme ungefähr {FormatHours(estimate.EffectiveRetentionHours)} im Rückblick"; _storageEstimate.ForeColor = storage.CanRecord ? Cyan : Amber; }
@@ -501,14 +459,19 @@ public sealed partial class MainForm : Form
     protected override void OnHandleCreated(EventArgs e) { base.OnHandleCreated(e); try { int dark = 1; DwmSetWindowAttribute(Handle, 20, ref dark, sizeof(int)); } catch (DllNotFoundException) { } catch (EntryPointNotFoundException) { } if (!_enableHotkeys) return; const uint modifiers = 0x0001 | 0x0002 | 0x4000; _hotkeyToggle = RegisterHotKey(Handle, 8, modifiers, (uint)Keys.F8); _hotkeyProtect = RegisterHotKey(Handle, 9, modifiers, (uint)Keys.F9); _hotkeyPause = RegisterHotKey(Handle, 10, modifiers, (uint)Keys.F10); _hotkeyBookmark = RegisterHotKey(Handle, 11, modifiers, (uint)Keys.F11); if (!_hotkeyToggle || !_hotkeyProtect || !_hotkeyPause || !_hotkeyBookmark) _footer.Text = "Ein Tastenkürzel ist bereits belegt. Nutze die Schaltflächen oder das Menü im Infobereich."; }
     protected override void OnHandleDestroyed(EventArgs e) { if (_hotkeyToggle) UnregisterHotKey(Handle, 8); if (_hotkeyProtect) UnregisterHotKey(Handle, 9); if (_hotkeyPause) UnregisterHotKey(Handle, 10); if (_hotkeyBookmark) UnregisterHotKey(Handle, 11); _hotkeyToggle = _hotkeyProtect = _hotkeyPause = _hotkeyBookmark = false; base.OnHandleDestroyed(e); }
     protected override void WndProc(ref Message m) { if (m.Msg == 0x0312) { int id = m.WParam.ToInt32(); if (id == 8) { _ = ToggleRecordingActionAsync(); return; } if (id == 9) { _ = RunActionAsync(_controller.ProtectRecentAsync); return; } if (id == 11 && _bookmark.Enabled) { _ = AddBookmarkAsync(); return; } if (id == 10 && (_controller.Status.Armed || _controller.Status.Recording)) { _ = RunActionAsync(TogglePauseAsync); return; } } base.WndProc(ref m); }
-    protected override void Dispose(bool disposing) { if (disposing) { _controller.Changed -= ControllerChanged; _controller.Notice -= ControllerNotice; _archiveReloadCancellation.Cancel(); _exportCancellation?.Cancel(); _updateCancellation?.Cancel(); _archiveMenu.Dispose(); _tray.Visible = false; _tray.Dispose(); _trayMenu.Dispose(); _tips.Dispose(); } base.Dispose(disposing); }
+    protected override void Dispose(bool disposing) { if (disposing) { DisposeMotion(); _controller.Changed -= ControllerChanged; _controller.Notice -= ControllerNotice; _archiveReloadCancellation.Cancel(); _exportCancellation?.Cancel(); _updateCancellation?.Cancel(); _archiveMenu.Dispose(); _tray.Visible = false; _tray.Dispose(); _trayMenu.Dispose(); _tips.Dispose(); } base.Dispose(disposing); }
     [DllImport("user32.dll", SetLastError = true)] private static extern bool RegisterHotKey(IntPtr window, int id, uint modifiers, uint key);
     [DllImport("user32.dll", SetLastError = true)] private static extern bool UnregisterHotKey(IntPtr window, int id);
     [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);
 
-    private static TableLayoutPanel Grid(int columns, int rows) => new() { Dock = DockStyle.Fill, ColumnCount = columns, RowCount = rows, Margin = Padding.Empty, BackColor = Color.Transparent };
+    private static TableLayoutPanel Grid(int columns, int rows)
+    {
+        var grid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = columns, RowCount = rows, Margin = Padding.Empty, BackColor = Color.Transparent };
+        if (columns == 1) grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        return grid;
+    }
     private static Label TextLabel(string text, float size, Color color, FontStyle style = FontStyle.Regular) => new() { Text = text, Dock = DockStyle.Fill, AutoSize = false, ForeColor = color, Font = new Font("Segoe UI", size, style), TextAlign = ContentAlignment.MiddleLeft, Margin = Padding.Empty, BackColor = Color.Transparent, AutoEllipsis = true };
-    private static Button ActionButton(string text, bool primary = false) { var button = new ThemeButton { Text = text, FlatStyle = FlatStyle.Flat, BackColor = primary ? Cyan : Input, ForeColor = primary ? Sidebar : Ink, Font = new Font("Segoe UI", 10, primary ? FontStyle.Bold : FontStyle.Regular), UseVisualStyleBackColor = false, Cursor = Cursors.Hand, Margin = new Padding(0, 0, 9, 0), TabStop = true }; button.FlatAppearance.BorderSize = 0; button.FlatAppearance.MouseOverBackColor = primary ? Color.FromArgb(127, 230, 247) : Color.FromArgb(42, 54, 73); button.FlatAppearance.MouseDownBackColor = primary ? Color.FromArgb(63, 188, 212) : Color.FromArgb(51, 67, 89); return button; }
+    private static Button ActionButton(string text, bool primary = false) { var button = new ThemeButton { Text = text, Primary = primary, FlatStyle = FlatStyle.Flat, BackColor = primary ? Cyan : Input, ForeColor = primary ? Sidebar : Ink, Font = new Font("Segoe UI", 10, primary ? FontStyle.Bold : FontStyle.Regular), UseVisualStyleBackColor = false, Cursor = Cursors.Hand, Margin = new Padding(0, 0, 9, 0), TabStop = true }; button.FlatAppearance.BorderSize = 0; button.FlatAppearance.MouseOverBackColor = primary ? Color.FromArgb(148, 239, 228) : Color.FromArgb(43, 55, 74); button.FlatAppearance.MouseDownBackColor = primary ? Color.FromArgb(85, 190, 180) : Color.FromArgb(52, 70, 86); return button; }
     private static Panel Surface(Padding padding) => new RoundedPanel { Dock = DockStyle.Fill, BackColor = Card, Padding = padding, Margin = new Padding(0, 0, 0, 12) };
     private static Panel Metric(string heading, Label value, string detail, bool last) { var panel = Surface(new Padding(16, 12, 16, 12)); panel.Margin = new Padding(0, 0, last ? 0 : 10, 12); var grid = Grid(1, 3); grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 23)); grid.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 22)); grid.Controls.Add(TextLabel(heading, 7.8f, Muted, FontStyle.Bold), 0, 0); grid.Controls.Add(value, 0, 1); grid.Controls.Add(TextLabel(detail, 8, Muted), 0, 2); panel.Controls.Add(grid); return panel; }
     private static TableLayoutPanel SettingsGrid(Panel parent) { var fields = Grid(2, 0); fields.Dock = DockStyle.Top; fields.AutoSize = true; fields.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 187)); fields.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); parent.Controls.Add(fields); return fields; }
@@ -521,7 +484,7 @@ public sealed partial class MainForm : Form
     private static ComboBox Choice() { var choice = new ThemeComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat, BackColor = Input, ForeColor = Ink, IntegralHeight = true, DrawMode = DrawMode.OwnerDrawFixed, ItemHeight = 25 }; choice.DrawItem += (_, e) => { bool highlight = (e.State & DrawItemState.Selected) != 0 && (e.State & DrawItemState.ComboBoxEdit) == 0; using var background = new SolidBrush(highlight ? Color.FromArgb(43, 64, 83) : Input); e.Graphics.FillRectangle(background, e.Bounds); string text = e.Index >= 0 ? (choice.GetItemText(choice.Items[e.Index]) ?? "") : choice.Text; TextRenderer.DrawText(e.Graphics, text, e.Font, new Rectangle(e.Bounds.X + 7, e.Bounds.Y, Math.Max(0, e.Bounds.Width - 9), e.Bounds.Height), choice.Enabled ? Ink : Muted, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix); e.DrawFocusRectangle(); }; return choice; }
     private static CheckBox Check(string text) => new ThemeCheckBox { Text = text, AccessibleName = text, Dock = DockStyle.Fill, ForeColor = Ink, AutoSize = false, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9.5f) };
     private static NumericUpDown Number(int minimum, int maximum) => new() { Minimum = minimum, Maximum = maximum, Width = 98, BackColor = Input, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle, TextAlign = HorizontalAlignment.Right, ThousandsSeparator = true, Font = new Font("Segoe UI", 10) };
-    private static Control WithUnit(NumericUpDown number, string unit) { var panel = Grid(2, 1); panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 108)); panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); number.Margin = new Padding(0, 3, 10, 0); panel.Controls.Add(number, 0, 0); panel.Controls.Add(TextLabel(unit, 9, Muted), 1, 0); return panel; }
+    private static Control WithUnit(NumericUpDown number, string unit) { var panel = Grid(2, 1); panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 108)); panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); number.Anchor = AnchorStyles.Left; number.Margin = new Padding(0, 3, 10, 3); panel.Controls.Add(number, 0, 0); panel.Controls.Add(TextLabel(unit, 9, Muted), 1, 0); return panel; }
     private static void SetNumber(NumericUpDown control, int value) => control.Value = Math.Clamp(value, (int)control.Minimum, (int)control.Maximum);
     private static string FormatBytes(long bytes) => bytes >= 1024L * 1024 * 1024 ? $"{bytes / (1024d * 1024 * 1024):0.0} GB" : $"{bytes / (1024d * 1024):0.0} MB";
     private static string FormatDuration(TimeSpan value) { value = value < TimeSpan.Zero ? TimeSpan.Zero : value; return $"{(int)value.TotalHours:00}:{value.Minutes:00}:{value.Seconds:00}"; }
@@ -532,28 +495,26 @@ public sealed partial class MainForm : Form
         for (Control? parent = control.Parent; parent is not null; parent = parent.Parent) if (parent.BackColor.A == 255) return parent.BackColor;
         return Canvas;
     }
-    private sealed class RoundedPanel : Panel
-    {
-        public RoundedPanel() { SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true); }
-        protected override void OnPaintBackground(PaintEventArgs e) { e.Graphics.Clear(SurroundingColor(this)); e.Graphics.SmoothingMode = SmoothingMode.AntiAlias; using var path = RoundPath(new RectangleF(0, 0, Width - 1, Height - 1), 11); using var brush = new SolidBrush(BackColor); using var pen = new Pen(Line); e.Graphics.FillPath(brush, path); e.Graphics.DrawPath(pen, path); }
-    }
-    private sealed class ThemeButton : Button
-    {
-        private bool _hover, _pressed; public bool LeftAligned { get; set; } public bool AccentBorder { get; set; }
-        public ThemeButton() => SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-        protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); } protected override void OnMouseLeave(EventArgs e) { _hover = _pressed = false; Invalidate(); base.OnMouseLeave(e); } protected override void OnMouseDown(MouseEventArgs e) { if (e.Button == MouseButtons.Left) { _pressed = true; Invalidate(); } base.OnMouseDown(e); } protected override void OnMouseUp(MouseEventArgs e) { _pressed = false; Invalidate(); base.OnMouseUp(e); } protected override void OnEnabledChanged(EventArgs e) { Invalidate(); base.OnEnabledChanged(e); }
-        protected override void OnPaint(PaintEventArgs e) { var color = !Enabled ? Color.FromArgb(29, 37, 50) : _pressed ? FlatAppearance.MouseDownBackColor : _hover ? FlatAppearance.MouseOverBackColor : BackColor; e.Graphics.Clear(SurroundingColor(this)); e.Graphics.SmoothingMode = SmoothingMode.AntiAlias; using var path = RoundPath(new RectangleF(0, 0, Width - 1, Height - 1), 8); using var background = new SolidBrush(color); e.Graphics.FillPath(background, path); if (AccentBorder) { using var border = new Pen(Color.FromArgb(67, 121, 137)); e.Graphics.DrawPath(border, path); } var rect = Rectangle.Inflate(ClientRectangle, -8, -2); if (LeftAligned) rect.X += 8; TextRenderer.DrawText(e.Graphics, Text, Font, rect, Enabled ? ForeColor : Color.FromArgb(112, 129, 151), (LeftAligned ? TextFormatFlags.Left : TextFormatFlags.HorizontalCenter) | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix); if (Focused && ShowFocusCues) ControlPaint.DrawFocusRectangle(e.Graphics, Rectangle.Inflate(ClientRectangle, -5, -5), ForeColor, color); }
-    }
     private sealed class ThemeComboBox : ComboBox
     {
         protected override void WndProc(ref Message m)
         {
             base.WndProc(ref m);
+            if (m.Msg == 0x0085 && IsHandleCreated)
+            {
+                IntPtr dc = GetWindowDC(Handle);
+                if (dc != IntPtr.Zero)
+                {
+                    try { using var frame = Graphics.FromHdc(dc); using var pen = new Pen(Focused ? Cyan : Line); frame.DrawRectangle(pen, 0, 0, Width - 1, Height - 1); }
+                    finally { ReleaseDC(Handle, dc); }
+                }
+            }
             if (m.Msg is not (0x000F or 0x0317 or 0x0318) || !IsHandleCreated || Width < 25 || Height < 5) return;
             using var graphics = m.Msg == 0x000F ? Graphics.FromHwnd(Handle) : Graphics.FromHdc(m.WParam);
             int arrowWidth = 20 * DeviceDpi / 96;
             using var background = new SolidBrush(Input); graphics.FillRectangle(background, Width - arrowWidth, 1, arrowWidth - 1, Height - 2);
             using var border = new Pen(Focused ? Cyan : Line); graphics.DrawRectangle(border, 0, 0, Width - 1, Height - 1);
+            if (m.Msg is 0x0317 or 0x0318) graphics.DrawRectangle(border, -1, -1, Width, Height);
             int middle = Width - arrowWidth / 2, y = Height / 2;
             using var arrow = new Pen(Enabled ? Muted : Color.FromArgb(99, 111, 129), 1.3f);
             graphics.DrawLines(arrow, new Point[] { new(middle - 4, y - 2), new(middle, y + 2), new(middle + 4, y - 2) });
@@ -568,7 +529,7 @@ public sealed partial class MainForm : Form
         {
             e.Graphics.Clear(SurroundingColor(this)); e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             int boxSize = 16 * DeviceDpi / 96; int y = (Height - boxSize) / 2;
-            using var shape = RoundPath(new RectangleF(0, y, boxSize, boxSize), 3);
+            using var shape = RoundPath(new RectangleF(0, y, boxSize, boxSize), 4);
             using var fill = new SolidBrush(Checked ? (Enabled ? Cyan : Color.FromArgb(68, 91, 105)) : Input); using var border = new Pen(Checked ? Cyan : Line);
             e.Graphics.FillPath(fill, shape); e.Graphics.DrawPath(border, shape);
             if (Checked) { using var check = new Pen(Sidebar, 2 * DeviceDpi / 96f); e.Graphics.DrawLines(check, new PointF[] { new(boxSize * .23f, y + boxSize * .53f), new(boxSize * .43f, y + boxSize * .73f), new(boxSize * .79f, y + boxSize * .28f) }); }
@@ -594,11 +555,6 @@ public sealed partial class MainForm : Form
         public double Fraction { get => _fraction; set { if (_fraction != value) { _fraction = value; Invalidate(); } } } public double ProtectedFraction { get => _protectedFraction; set { if (_protectedFraction != value) { _protectedFraction = value; Invalidate(); } } } public bool Warning { get => _warning; set { if (_warning != value) { _warning = value; Invalidate(); } } }
         public StorageMeter() { SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true); Margin = new Padding(0, 4, 0, 4); }
         protected override void OnPaint(PaintEventArgs e) { e.Graphics.SmoothingMode = SmoothingMode.AntiAlias; using var path = RoundPath(new RectangleF(0, 0, Width, Height), 3); using var background = new SolidBrush(Line); e.Graphics.FillPath(background, path); e.Graphics.SetClip(path); using var fill = new SolidBrush(_warning ? Amber : Cyan); using var protect = new SolidBrush(Violet); e.Graphics.FillRectangle(fill, 0, 0, (int)(ClientSize.Width * _fraction), ClientSize.Height); e.Graphics.FillRectangle(protect, 0, 0, (int)(ClientSize.Width * Math.Min(_fraction, _protectedFraction)), ClientSize.Height); }
-    }
-    private sealed class BrandMark : Control
-    {
-        public BrandMark() => SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
-        protected override void OnPaint(PaintEventArgs e) { e.Graphics.SmoothingMode = SmoothingMode.AntiAlias; using var path = RoundPath(new RectangleF(0, 0, Width - 1, Height - 1), 10); using var fill = new SolidBrush(Cyan); e.Graphics.FillPath(fill, path); using var stroke = new Pen(Sidebar, 2.2f); e.Graphics.DrawRectangle(stroke, 9, 10, 18, 13); e.Graphics.DrawLine(stroke, 14, 27, 23, 27); e.Graphics.DrawLine(stroke, 18, 23, 18, 27); using var dot = new SolidBrush(Sidebar); e.Graphics.FillEllipse(dot, 14, 13, 8, 8); }
     }
     private sealed class DarkMenuRenderer : ToolStripProfessionalRenderer
     {

@@ -5,15 +5,16 @@ public sealed partial class MainForm
     private readonly Panel _toolsPage = new() { Dock = DockStyle.Fill }, _toolFields = new() { Dock = DockStyle.Fill };
     private readonly Button[] _toolNav = new Button[3];
     private readonly Panel[] _toolTabs = new Panel[3];
-    private readonly Button _bookmark = ActionButton("◆ Lesezeichen"), _bookmarksSelected = ActionButton("Lesezeichen …"), _findTime = ActionButton("Zeitpunkt …");
+    private readonly Button _bookmark = ActionButton("Lesezeichen"), _bookmarksSelected = ActionButton("Lesezeichen …"), _findTime = ActionButton("Zeitpunkt …");
     private readonly ToolStripMenuItem _trayBookmark;
     private readonly CheckBox _microphoneEnabled = Check("Mikrofon zusätzlich aufnehmen · standardmäßig aus"), _warnOnSilence = Check("Bei fehlendem Ton oder getrenntem Gerät warnen"), _gameDetection = Check("Bei ausgewählten Spielen automatisch aufnehmen");
     private readonly ComboBox _microphone = Choice(), _savedProfiles = Choice();
     private readonly NumericUpDown _systemGain = Number(0, 200), _microphoneGain = Number(0, 200), _silenceSeconds = Number(10, 600);
     private readonly TextBox _profileName = Entry(), _gameNames = Entry(), _updateDirectory = Entry();
     private readonly Button _openUpdateFolder = ActionButton("Ordner öffnen"), _testMicrophone = ActionButton("Mikrofon testen");
-    private readonly Button _saveProfile = ActionButton("Profil speichern", true), _applyProfile = ActionButton("Anwenden"), _deleteProfile = ActionButton("Löschen"), _pickGames = ActionButton("Laufende Spiele …"), _saveGames = ActionButton("Spielerkennung speichern", true), _checkUpdate = ActionButton("Update prüfen"), _downloadUpdate = ActionButton("Update vorbereiten", true), _launchUpdate = ActionButton("Jetzt wechseln …"), _cancelUpdate = ActionButton("Abbrechen");
+    private readonly Button _saveProfile = ActionButton("Profil speichern", true), _applyProfile = ActionButton("Anwenden"), _deleteProfile = ActionButton("Löschen"), _pickGames = ActionButton("Laufende Spiele …"), _saveGames = ActionButton("Erkennung speichern", true), _checkUpdate = ActionButton("Update prüfen"), _downloadUpdate = ActionButton("Update vorbereiten", true), _launchUpdate = ActionButton("Jetzt wechseln …"), _cancelUpdate = ActionButton("Abbrechen");
     private readonly Label _profilesHint = TextLabel("Bildschirm, Ton und Qualität als eigenes Profil speichern.", 9, Muted), _gamesHint = TextLabel("Spielnamen mit .exe eintragen, durch Komma trennen. Erkennung ist standardmäßig aus.", 9, Muted), _updateHint = TextLabel("Updates werden erst auf deinen Klick bei GitHub geprüft.", 9, Muted);
+    private readonly ToolStatusPill _profileStatus = new("DEIN SETUP", Violet), _gameStatus = new("AUSGESCHALTET", Muted), _updateStatus = new("MANUELL", Cyan);
     private UpdateInfo? _availableUpdate;
     private PreparedUpdate? _preparedUpdate;
     private CancellationTokenSource? _updateCancellation;
@@ -34,19 +35,19 @@ public sealed partial class MainForm
 
     private void BuildTools()
     {
-        var grid = Grid(1, 2); grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 48)); grid.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); _toolsPage.Controls.Add(grid);
-        var tabs = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = Padding.Empty }; string[] titles = ["Aufnahmeprofile", "Spielerkennung", "Updates"];
-        for (int i = 0; i < titles.Length; i++) { int tab = i; _toolNav[i] = ActionButton(titles[i]); _toolNav[i].Size = new Size(164, 36); _toolNav[i].Click += (_, _) => ShowToolTab(tab); tabs.Controls.Add(_toolNav[i]); }
+        var grid = Grid(1, 2); grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 58)); grid.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); _toolsPage.Controls.Add(grid);
+        var tabs = Grid(3, 1); string[] titles = ["Aufnahmeprofile", "Spielerkennung", "Updates"];
+        for (int i = 0; i < titles.Length; i++) { int tab = i; tabs.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / 3)); _toolNav[i] = ActionButton(titles[i]); _toolNav[i].Dock = DockStyle.Fill; _toolNav[i].Margin = new Padding(0, 0, i == titles.Length - 1 ? 0 : 10, 12); _toolNav[i].Click += (_, _) => ShowToolTab(tab); tabs.Controls.Add(_toolNav[i], i, 0); }
         grid.Controls.Add(tabs, 0, 0); grid.Controls.Add(_toolFields, 0, 1);
-        var profiles = Surface(new Padding(22, 15, 22, 15)); var pf = SettingsGrid(profiles); AddHeading(pf, "Deine Aufnahmeprofile", "Quellen, Mikrofon und Qualität mit einem Klick wiederverwenden.");
-        _savedProfiles.DisplayMember = nameof(RecordingProfile.Name); AddField(pf, "Gespeichertes Profil", _savedProfiles); _profileName.PlaceholderText = "z. B. Shooter · Headset"; _profileName.MaxLength = 60; AddField(pf, "Neues Profil", _profileName);
-        var pa = FeatureActions(_saveProfile, _applyProfile, _deleteProfile); AddWide(pf, pa, 44); AddWide(pf, _profilesHint, 55); AddHelp(pf, "Passe zunächst Bildschirm, Spielton, Mikrofon und Qualität unter Einstellungen an.\nDas Profil speichert auch deinen Entwurf. Speichergrenzen und Windows-Autostart werden beim Anwenden nicht geändert."); _toolTabs[0] = profiles; _toolFields.Controls.Add(profiles);
+        var profiles = Surface(new Padding(26, 22, 26, 24)); var pf = SettingsGrid(profiles); AddToolHeading(pf, "Ein Setup für jeden Moment", "Bildschirm, Ton und Qualität mit einem Klick wiederverwenden.", 0, _profileStatus);
+        _savedProfiles.DisplayMember = nameof(RecordingProfile.Name); AddField(pf, "Gespeichertes Profil", _savedProfiles, 50); _profileName.PlaceholderText = "z. B. Shooter · Headset"; _profileName.MaxLength = 60; AddField(pf, "Neuer Profilname", _profileName, 50);
+        var pa = FeatureActions(_saveProfile, _applyProfile, _deleteProfile); AddWide(pf, pa, 58); AddToolNote(pf, _profilesHint, 66); AddHelp(pf, "Stelle deine Quellen und Qualität unter Einstellungen ein.\nDas neue Profil speichert diesen Entwurf."); _toolTabs[0] = profiles; _toolFields.Controls.Add(profiles);
         _saveProfile.Click += async (_, _) => await SaveProfileAsync(); _applyProfile.Click += async (_, _) => await ApplySavedProfileAsync(); _deleteProfile.Click += async (_, _) => await DeleteProfileAsync(); _savedProfiles.SelectedIndexChanged += (_, _) => RefreshFeatureActions(); _profileName.TextChanged += (_, _) => RefreshFeatureActions();
-        var games = Surface(new Padding(22, 15, 22, 15)); var gf = SettingsGrid(games); AddHeading(gf, "Spiel gestartet? Rückblick läuft.", "Prüft alle paar Sekunden nur die Prozessnamen. Manuelle Aufnahme bleibt verfügbar."); AddWide(gf, _gameDetection, 35); _gameNames.PlaceholderText = "game.exe, anderes-spiel.exe"; AddField(gf, "Spiele / Programme", _gameNames);
-        var ga = FeatureActions(_pickGames, _saveGames); AddWide(gf, ga, 45); AddWide(gf, _gamesHint, 60); AddHelp(gf, "Die Erkennung verwendet deine gespeicherten Aufnahme-Einstellungen.\nNach manuellem Stopp startet sie erst wieder, wenn alle ausgewählten Spiele beendet und neu geöffnet wurden."); _toolTabs[1] = games; _toolFields.Controls.Add(games); _pickGames.Click += async (_, _) => await PickGamesAsync(); _saveGames.Click += async (_, _) => await SaveGamesAsync(); _gameNames.TextChanged += (_, _) => RefreshFeatureActions(); _gameDetection.CheckedChanged += (_, _) => RefreshFeatureActions();
-        var updates = Surface(new Padding(22, 15, 22, 15)); var uf = SettingsGrid(updates); AddHeading(uf, "ScreenDash aktuell halten", "Neue portable Windows-Version herunterladen, prüfen und Einstellungen behalten."); AddWide(uf, _updateHint, 80); var ua = FeatureActions(_checkUpdate, _downloadUpdate, _launchUpdate, _cancelUpdate); AddWide(uf, ua, 46);
+        var games = Surface(new Padding(26, 22, 26, 24)); var gf = SettingsGrid(games); AddToolHeading(gf, "Spiel an. Aufnahme bereit.", "Starte deinen Rückblick automatisch mit ausgewählten Spielen.", 1, _gameStatus); AddWide(gf, _gameDetection, 48); _gameNames.PlaceholderText = "game.exe, anderes-spiel.exe"; AddField(gf, "Spiele / Programme", _gameNames, 50);
+        var ga = FeatureActions(_pickGames, _saveGames); AddWide(gf, ga, 58); AddToolNote(gf, _gamesHint, 72); AddHelp(gf, "Die Erkennung nutzt deine gespeicherten Aufnahme-Einstellungen.\nNach manuellem Stopp müssen alle gewählten Spiele zuerst beendet werden."); _toolTabs[1] = games; _toolFields.Controls.Add(games); _pickGames.Click += async (_, _) => await PickGamesAsync(); _saveGames.Click += async (_, _) => await SaveGamesAsync(); _gameNames.TextChanged += (_, _) => RefreshFeatureActions(); _gameDetection.CheckedChanged += (_, _) => RefreshFeatureActions();
+        var updates = Surface(new Padding(26, 22, 26, 24)); var uf = SettingsGrid(updates); AddToolHeading(uf, "Immer auf deinem Stand", "Die nächste ScreenDash-Version ist nur wenige Klicks entfernt.", 2, _updateStatus); AddToolNote(uf, _updateHint, 88); var ua = FeatureActions(_checkUpdate, _downloadUpdate, _launchUpdate, _cancelUpdate); AddWide(uf, ua, 58);
         _updateDirectory.ReadOnly = true; _updateDirectory.Text = "Nach dem Vorbereiten verfügbar"; var location = Grid(2, 1); location.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); location.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130)); location.Controls.Add(_updateDirectory, 0, 0); _openUpdateFolder.Dock = DockStyle.Fill; _openUpdateFolder.Font = new Font("Segoe UI", 9); _openUpdateFolder.Margin = new Padding(8, 0, 0, 0); location.Controls.Add(_openUpdateFolder, 1, 0); AddField(uf, "Neuer Versionsordner", location, 44); _openUpdateFolder.Click += (_, _) => { if (_preparedUpdate is { } update) RunSync(() => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Path.GetDirectoryName(update.ExecutablePath) ?? update.Directory) { UseShellExecute = true })); };
-        var updateHelp = TextLabel("Beim Wechsel wird die Aufnahme gespeichert. Aufnahmen und Einstellungen bleiben erhalten.\nDie neue portable EXE startet aus einem neuen Versionsordner. Alte Verknüpfungen öffnen weiterhin\ndie alte Version; verwende danach die neue ScreenDash.exe aus dem angezeigten Ordner.", 9, Muted); updateHelp.TextAlign = ContentAlignment.TopLeft; updateHelp.Padding = new Padding(0, 17, 0, 0); AddWide(uf, updateHelp, 98); _toolTabs[2] = updates; _toolFields.Controls.Add(updates);
+        var updateHelp = TextLabel("Deine Aufnahme wird beim Wechsel gespeichert; Einstellungen bleiben erhalten.\nStarte danach die neue ScreenDash.exe aus dem angezeigten Ordner.\nBestehende Verknüpfungen führen weiterhin zur alten Version.", 9, Muted); updateHelp.TextAlign = ContentAlignment.TopLeft; updateHelp.Padding = new Padding(0, 17, 0, 0); AddWide(uf, updateHelp, 98); _toolTabs[2] = updates; _toolFields.Controls.Add(updates);
         _checkUpdate.Click += async (_, _) => await CheckUpdateAsync(); _downloadUpdate.Click += async (_, _) => await PrepareUpdateAsync(); _launchUpdate.Click += async (_, _) => await LaunchUpdateAsync(); _cancelUpdate.Click += (_, _) => _updateCancellation?.Cancel();
         foreach (var panel in _toolTabs) { panel.AutoScroll = true; panel.Margin = Padding.Empty; } ShowToolTab(0);
     }
@@ -56,7 +57,47 @@ public sealed partial class MainForm
     private static FlowLayoutPanel FeatureActions(params Button[] buttons)
     {
         var row = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = Padding.Empty, Padding = new Padding(0, 3, 0, 0) };
-        foreach (var button in buttons) { button.Size = new Size(button.Text.Length > 19 ? 217 : button.Text.Length > 14 ? 173 : 132, 35); button.Font = new Font("Segoe UI", 9); row.Controls.Add(button); } return row;
+        foreach (var button in buttons) { button.Font = new Font("Segoe UI", 9); button.Size = new Size(Math.Max(108, TextRenderer.MeasureText(button.Text, button.Font).Width + 28), 38); button.Margin = new Padding(0, 0, 8, 0); row.Controls.Add(button); } return row;
+    }
+
+    private static void AddToolHeading(TableLayoutPanel fields, string title, string description, int symbol, ToolStatusPill status)
+    {
+        var header = Grid(2, 1); header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 60)); header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        var icon = new ToolSymbol(symbol) { Dock = DockStyle.Top, Height = 46, Margin = new Padding(0, 5, 14, 0) }; header.Controls.Add(icon, 0, 0);
+        var copy = Grid(2, 3); copy.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); copy.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 136)); copy.RowStyles.Add(new RowStyle(SizeType.Absolute, 27)); copy.RowStyles.Add(new RowStyle(SizeType.Absolute, 34)); copy.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        copy.Controls.Add(TextLabel(symbol == 0 ? "AUFNAHMEPROFILE" : symbol == 1 ? "SPIELERKENNUNG" : "UPDATES", 7.5f, Muted, FontStyle.Bold), 0, 0); status.Dock = DockStyle.Fill; status.Margin = new Padding(0, 1, 0, 2); copy.Controls.Add(status, 1, 0);
+        var heading = TextLabel(title, 17, Ink, FontStyle.Bold); copy.Controls.Add(heading, 0, 1); copy.SetColumnSpan(heading, 2);
+        var help = TextLabel(description, 9, Muted); help.TextAlign = ContentAlignment.TopLeft; help.Padding = new Padding(0, 3, 0, 0); copy.Controls.Add(help, 0, 2); copy.SetColumnSpan(help, 2); header.Controls.Add(copy, 1, 0); AddWide(fields, header, 118);
+    }
+
+    private static void AddToolNote(TableLayoutPanel fields, Label label, int height)
+    {
+        var note = Surface(new Padding(15, 10, 15, 10)); note.BackColor = Input; note.Margin = new Padding(0, 7, 0, 10); label.TextAlign = ContentAlignment.MiddleLeft; note.Controls.Add(label); AddWide(fields, note, height);
+    }
+
+    private sealed class ToolStatusPill : Control
+    {
+        public ToolStatusPill(string text, Color tone) { Text = AccessibleName = text; ForeColor = tone; Font = new Font("Segoe UI", 7.5f, FontStyle.Bold); AccessibleRole = AccessibleRole.StaticText; SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true); }
+        protected override void OnTextChanged(EventArgs e) { AccessibleName = Text; Invalidate(); base.OnTextChanged(e); }
+        protected override void OnForeColorChanged(EventArgs e) { Invalidate(); base.OnForeColorChanged(e); }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.Clear(SurroundingColor(this)); e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias; using var path = RoundPath(new RectangleF(0, 0, Width - 1, Height - 1), Height / 2f); using var fill = new SolidBrush(Color.FromArgb(25, ForeColor)); using var border = new Pen(Color.FromArgb(65, ForeColor)); e.Graphics.FillPath(fill, path); e.Graphics.DrawPath(border, path); TextRenderer.DrawText(e.Graphics, Text, Font, Rectangle.Inflate(ClientRectangle, -8, 0), ForeColor, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+        }
+    }
+
+    private sealed class ToolSymbol : Control
+    {
+        private readonly int _kind;
+        public ToolSymbol(int kind) { _kind = kind; BackColor = Card; SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true); }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.Clear(SurroundingColor(this)); e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias; float scale = Math.Min(Width, Height) / 46f; var state = e.Graphics.Save(); e.Graphics.ScaleTransform(scale, scale); using var bg = RoundPath(new RectangleF(0, 0, 43, 43), 12); using var fill = new SolidBrush(Input); e.Graphics.FillPath(fill, bg); using var pen = new Pen(_kind == 0 ? Violet : Cyan, 1.7f) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round, LineJoin = System.Drawing.Drawing2D.LineJoin.Round };
+            if (_kind == 0) { e.Graphics.DrawRectangle(pen, 12, 10, 20, 22); e.Graphics.DrawLine(pen, 17, 17, 27, 17); e.Graphics.DrawLine(pen, 17, 22, 27, 22); e.Graphics.DrawLine(pen, 17, 27, 23, 27); }
+            else if (_kind == 1) { using var pad = RoundPath(new RectangleF(9, 14, 25, 16), 5); e.Graphics.DrawPath(pen, pad); e.Graphics.DrawLine(pen, 14, 22, 20, 22); e.Graphics.DrawLine(pen, 17, 19, 17, 25); e.Graphics.DrawEllipse(pen, 26, 18, 2, 2); e.Graphics.DrawEllipse(pen, 29, 23, 2, 2); }
+            else { e.Graphics.DrawArc(pen, 11, 11, 22, 22, 35, 285); e.Graphics.DrawLines(pen, new PointF[] { new(31, 9), new(32, 17), new(25, 15) }); e.Graphics.DrawLine(pen, 22, 16, 22, 27); e.Graphics.DrawLines(pen, new PointF[] { new(18, 23), new(22, 27), new(26, 23) }); }
+            e.Graphics.Restore(state); base.OnPaint(e);
+        }
     }
 
     private void LoadFeatureSettings(AppSettings s)
@@ -85,14 +126,17 @@ public sealed partial class MainForm
         _saveProfile.Enabled = idle && !_profilesLoading && _profileName.Text.Trim().Length > 0; _applyProfile.Enabled = idle && !_profilesLoading && _savedProfiles.SelectedItem is RecordingProfile; _deleteProfile.Enabled = idle && !_profilesLoading && _savedProfiles.SelectedItem is RecordingProfile;
         _gameDetection.Enabled = _gameNames.Enabled = idle && !_gamesBusy; _pickGames.Enabled = idle && !_gamesBusy; _saveGames.Enabled = idle && !_gamesBusy && GamesFingerprint() != _gamesBaseline;
         _checkUpdate.Enabled = !_checkingUpdate && _activeUpdateTask is null && !_exitInProgress; _downloadUpdate.Enabled = !_checkingUpdate && _activeUpdateTask is null && _availableUpdate is { IsNewer: true } && _preparedUpdate is null && !_exitInProgress; _launchUpdate.Enabled = _openUpdateFolder.Enabled = _preparedUpdate is not null && !_checkingUpdate && _activeUpdateTask is null && !_exitInProgress; _cancelUpdate.Visible = _activeUpdateTask is not null;
-        _profilesHint.Text = idle ? "Speichert den aktuellen Entwurf aus Einstellungen; Aufnahmeordner und Speicherregeln bleiben beim Anwenden erhalten." : "Stoppe die Aufnahme, um ein Profil zu speichern oder anzuwenden.";
+        _profilesHint.Text = idle ? "Profile ändern deine Aufnahmequellen und Qualität. Ordner und Speicherregeln bleiben erhalten." : "Stoppe die Aufnahme, um ein Profil zu speichern oder anzuwenden.";
+        _profileStatus.Text = _profilesLoading ? "WIRD GELADEN" : _savedProfiles.Items.Count == 1 ? "1 PROFIL" : $"{_savedProfiles.Items.Count} PROFILE";
+        bool configuredGames = _controller.Settings.GameDetectionEnabled; _gameStatus.Text = configuredGames ? "AKTIVIERT" : "AUSGESCHALTET"; _gameStatus.ForeColor = configuredGames ? Cyan : Muted;
+        _updateStatus.Text = _activeUpdateTask is not null ? "DOWNLOAD" : _checkingUpdate ? "WIRD GEPRÜFT" : _preparedUpdate is not null ? "BEREIT" : _availableUpdate is { IsNewer: true } ? "VERFÜGBAR" : "MANUELL";
     }
     private string GamesFingerprint() => _gameDetection.Checked + "\n" + _gameNames.Text.Trim();
 
     private async Task AddBookmarkAsync()
     {
         if (!_bookmark.Enabled) return;
-        await RunActionAsync(async () => { await _controller.AddBookmarkAsync(); _footer.Text = "◆ Moment markiert und ganze Datei gesichert. Unter Aufnahmen → Lesezeichen kannst du ihn benennen und als Clip exportieren."; });
+        await RunActionAsync(async () => { await _controller.AddBookmarkAsync(); _footer.Text = "Moment markiert, ganze Datei gesichert. Unter Aufnahmen / Lesezeichen kannst du ihn benennen und als Clip exportieren."; });
     }
     private async Task ReloadProfilesAsync()
     {
@@ -189,6 +233,6 @@ public sealed partial class MainForm
     private async Task TestMicrophoneAsync()
     {
         if (!_testMicrophone.Enabled || !_microphoneEnabled.Checked || _microphone.SelectedItem is not AudioSource source) return;
-        await RunActionAsync(async () => { using var capture = await Task.Run(() => new MicrophoneCapture(source.Id)); capture.Start(); double peak = 0; try { for (int i = 0; i < 40 && !_exitInProgress && !IsDisposed; i++) { await Task.Delay(125); peak = Math.Max(peak, capture.PeakLevel); _audioTestResult.Text = $"Mikrofonprüfung · {capture.DeviceName} · {peak * 100:0} %"; } if (!IsDisposed) { _audioTestResult.Text = peak > 0.0001 ? $"✓ Stimme empfangen · {capture.DeviceName}" : "Kein Mikrofonton. Sprich ins Mikrofon und prüfe den Windows-Mikrofonzugriff."; _audioTestResult.ForeColor = peak > 0.0001 ? Cyan : Amber; } } finally { await capture.StopAsync(); } });
+        await RunActionAsync(async () => { using var capture = await Task.Run(() => new MicrophoneCapture(source.Id)); capture.Start(); double peak = 0; try { for (int i = 0; i < 40 && !_exitInProgress && !IsDisposed; i++) { await Task.Delay(125); peak = Math.Max(peak, capture.PeakLevel); _audioTestResult.Text = $"Mikrofonprüfung · {capture.DeviceName} · {peak * 100:0} %"; } if (!IsDisposed) { _audioTestResult.Text = peak > 0.0001 ? $"Stimme empfangen · {capture.DeviceName}" : "Kein Mikrofonton. Sprich ins Mikrofon und prüfe den Windows-Mikrofonzugriff."; _audioTestResult.ForeColor = peak > 0.0001 ? Cyan : Amber; } } finally { await capture.StopAsync(); } });
     }
 }
