@@ -2,6 +2,7 @@ using System.Text.Json;
 using ScreenDash;
 
 if (args.Length > 0 && args[0] == "--scheduling-checks") return await SchedulingChecks.RunAsync();
+if (args.Length > 0 && args[0] == "--feature-checks") return await ControllerFeatureChecks.RunAsync();
 
 string directory = Path.GetFullPath(args.Length > 0 ? args[0] : "work/controller-integration");
 Directory.CreateDirectory(directory);
@@ -24,6 +25,10 @@ try
     await controller.ResumeAsync();
     Check(controller.Status.Recording && controller.Status.Elapsed >= started, "Resume on active recording is harmless");
     await Task.Delay(2500);
+    await controller.AddBookmarkAsync("Testmoment");
+    var liveFile = controller.GetRecordings().Single();
+    var bookmark = (await controller.GetBookmarksAsync(liveFile.Path)).Single();
+    Check(bookmark.Label == "Testmoment" && bookmark.Offset > TimeSpan.Zero && liveFile.Protected, "Live bookmark has a video offset and protects the entire recording");
     await controller.ProtectRecentAsync();
     Check(controller.GetRecordings().Any(f => f.Protected && f.Active), "Recent protection includes current segment");
     await controller.PauseAsync();
@@ -41,6 +46,11 @@ try
     Check(new FileInfo(export).Length > 0, "Closed segment exports as MP4 while paused");
     var details = await controller.GetMediaDetailsAsync(first.Path);
     Check(details.Duration > TimeSpan.Zero && details.HasAudio && details.Width > 0, "Completed recording exposes duration, dimensions and audio");
+    Check(bookmark.Offset < details.Duration, "Live bookmark remains inside the finalized video");
+    var timeMatch = await controller.FindByTimeAsync(first.StartedUtc.AddMilliseconds(500).ToLocalTime());
+    Check(timeMatch?.Recording.Path == first.Path && Math.Abs(timeMatch.Offset.TotalMilliseconds - 500) < 1, "Date and time search locates the finalized recording and exact relative offset");
+    await controller.RenameBookmarkAsync(first.Path, bookmark.Id, "Umbenannt");
+    Check((await controller.GetBookmarksAsync(first.Path)).Single().Label == "Umbenannt", "Bookmark name persists through controller integration");
     string clip = Path.Combine(directory, "short-clip.mp4");
     await controller.ExportClipAsync(first.Path, clip, new ClipRange(TimeSpan.Zero, TimeSpan.FromSeconds(Math.Min(1, details.Duration.TotalSeconds))));
     Check(new FileInfo(clip).Length > 0 && File.Exists(first.Path), "Clip export keeps the original recording");
@@ -64,7 +74,7 @@ try
     await controller.SetProtectedManyAsync(clips.Select(f => f.Path).ToArray(), false);
     Check(controller.GetRecordings().All(f => !f.Protected), "Batch protection update persists");
     int deleted = await controller.DeleteRecordingsAsync([first.Path]);
-    Check(deleted == 1 && !File.Exists(first.Path) && !File.Exists(first.Path + ".note.json"), "Manual deletion removes video and own label sidecar");
+    Check(deleted == 1 && !File.Exists(first.Path) && !File.Exists(first.Path + ".note.json") && !File.Exists(first.Path + ".bookmarks.json"), "Manual deletion removes video and both owned metadata sidecars");
     Check(File.Exists(export), "Export survives original video deletion");
     File.WriteAllText(Path.Combine(directory, "controller-result.json"), JsonSerializer.Serialize(new { success = true, checks }, new JsonSerializerOptions { WriteIndented = true }));
 }

@@ -13,6 +13,8 @@ if (Process.GetCurrentProcess().ProcessName.Equals("ffmpeg", StringComparison.Or
     && Environment.GetEnvironmentVariable(ProcessRegression.FakeLogVariable) is not null)
     return await ProcessRegression.RunFakeExportAsync(args);
 if (args.Length > 0 && args[0] == "--process-checks") return await ProcessRegression.RunAsync();
+if (args.Length > 0 && args[0] == "--audio-checks") return await AudioChecks.RunAsync();
+if (args.Length > 0 && args[0] == "--audio-integration") return await AudioChecks.RunIntegrationAsync();
 
 var directory = Path.GetFullPath(args.Length > 0 ? args[0] : Path.Combine("work", "segments"));
 var shortTest = args.Length > 1 && args[1] == "short";

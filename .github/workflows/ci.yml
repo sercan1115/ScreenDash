@@ -68,11 +68,26 @@ jobs:
           dotnet run --project ScreenDash.ControllerCheck/ScreenDash.ControllerCheck.csproj --configuration Release -- --scheduling-checks
           if ($LASTEXITCODE -ne 0) { throw 'Controller scheduling tests failed.' }
 
+      - name: Test profiles, game detection and safe updates
+        run: |
+          dotnet run --project ScreenDash.FeatureTests/ScreenDash.FeatureTests.csproj --configuration Release
+          if ($LASTEXITCODE -ne 0) { throw 'Feature service tests failed.' }
+
+      - name: Test bounded audio buffers without capture devices
+        run: |
+          dotnet run --project ScreenDash.RecorderTests/ScreenDash.RecorderTests.csproj --configuration Release -- --audio-checks
+          if ($LASTEXITCODE -ne 0) { throw 'Audio tests failed.' }
+
+      - name: Test feature controller integration without capture
+        run: |
+          dotnet run --project ScreenDash.ControllerCheck/ScreenDash.ControllerCheck.csproj --configuration Release -- --feature-checks
+          if ($LASTEXITCODE -ne 0) { throw 'Feature controller checks failed.' }
+
       - name: Publish portable Windows x64 application
         run: |
           dotnet publish ScreenDash/ScreenDash.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:DebugSymbols=false --output dist
           if ($LASTEXITCODE -ne 0) { throw 'Application publish failed.' }
-          Copy-Item -LiteralPath README.de.md, NEU-IN-1.3.de.md, TESTBERICHT.de.md, Drittanbieter-Lizenzen.txt -Destination dist
+          Copy-Item -LiteralPath README.de.md, NEU-IN-1.4.de.md, TESTBERICHT.de.md, Drittanbieter-Lizenzen.txt -Destination dist
           if (Test-Path -LiteralPath LICENSE) { Copy-Item -LiteralPath LICENSE -Destination dist }
 
       - name: Upload portable application

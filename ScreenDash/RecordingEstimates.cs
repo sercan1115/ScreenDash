@@ -9,7 +9,7 @@ public static class RecordingEstimates
     {
         ArgumentNullException.ThrowIfNull(settings);
         const double gib = 1024d * 1024 * 1024;
-        double rate = (Math.Clamp(settings.VideoBitrateKbps, 500, 50_000) + (settings.AudioEnabled ? 128 : 0)) * 1000d / 8 * 3600 * 1.03;
+        double rate = (Math.Clamp(settings.VideoBitrateKbps, 500, 50_000) + (settings.AudioEnabled || settings.MicrophoneEnabled ? 128 : 0)) * 1000d / 8 * 3600 * 1.03;
         double pinned = Math.Max(0, protectedBytes);
         double quota = Math.Clamp(settings.MaxStorageGb, 1, 4096) * gib;
         double hoursAtLimit = Math.Max(0, quota - pinned) / rate;

@@ -14,8 +14,10 @@
 *.pcm
 *.keep
 *.note.json
+*.bookmarks.json
 *.log
 settings.json
+profiles.json
 /smoke-test/
 /test-output/
 

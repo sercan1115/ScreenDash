@@ -2,13 +2,20 @@
 
 Eine lokale Bildschirm-Dashcam für **Windows 10/11 (64 Bit)**. ScreenDash zeichnet einen ausgewählten Monitor mit Systemton auf, speichert eine durchgehende Datei je Aufnahme und räumt alte Aufnahmen automatisch auf.
 
-**[Windows-Version herunterladen](https://github.com/sercan1115/ScreenDash/releases/latest)** · [Anleitung](README.de.md) · [Neuerungen in 1.3](NEU-IN-1.3.de.md)
+**[Windows-Version herunterladen](https://github.com/sercan1115/ScreenDash/releases/latest)** · [Anleitung](README.de.md) · [Neuerungen in 1.4](NEU-IN-1.4.de.md)
 
 ![ScreenDash – Aufnahmeübersicht mit Beispieldaten](docs/screenshots/dashboard.png)
 
 Die Bilder zeigen die Oberfläche mit Beispieldaten. Ihre Auslastungsanzeigen sind keine Messwerte.
 
 ## Funktionen
+
+- **Lesezeichen:** während der Aufnahme Momente markieren, die ganze Datei schützen und später Clips davor/danach exportieren.
+- **Spielerkennung:** bei ausgewählten Spielen automatisch starten/stoppen; manuelles Stoppen wird respektiert. Anfangs ausgeschaltet.
+- **Aufnahmeprofile:** eigene Bildschirm-/Audio-/Qualitätseinstellungen speichern, ohne Speicherregeln oder Autostart zu verändern.
+- **Tonwarnungen und Mikrofon:** fehlenden Spielton anzeigen; optional Stimme und Systemton mit getrennten Lautstärken in einer gemeinsamen Tonspur aufnehmen.
+- **Manuelle Updates:** GitHub prüfen, Download abbrechen, SHA256 prüfen und zur neuen portablen EXE wechseln. Einstellungen und Aufnahmen bleiben erhalten.
+- **Zeitpunkt suchen:** Aufnahme zu einem Datum und einer Uhrzeit finden und als Clip vorbereiten.
 
 - **Clip-Export:** beliebigen Ausschnitt oder die letzten 30 Sekunden, eine Minute oder fünf Minuten als MP4 kopieren. Schneller Schnitt ohne Neukodierung, an Schlüsselbildern orientiert.
 - **Aufnahme-Timer:** optional nach einer gewünschten aktiven Aufnahmedauer stoppen; Pausen halten den Countdown an.
@@ -30,6 +37,8 @@ Die Bilder zeigen die Oberfläche mit Beispieldaten. Ihre Auslastungsanzeigen si
 
 ![ScreenDash – Clipwerkzeug mit Beispieldaten](docs/screenshots/clip.png)
 
+![ScreenDash – Werkzeugbereich mit Beispieldaten](docs/screenshots/tools.png)
+
 ## Starten
 
 1. Die Windows-ZIP aus den [Releases](https://github.com/sercan1115/ScreenDash/releases/latest) herunterladen und vollständig entpacken.
@@ -48,6 +57,7 @@ Die portable App enthält die .NET-Laufzeit. FFmpeg ist separat erforderlich; Sc
 | Strg + Alt + F8 | Aufnahme starten / stoppen |
 | Strg + Alt + F9 | Letzte Minuten schützen |
 | Strg + Alt + F10 | Aufnahme pausieren / fortsetzen |
+| Strg + Alt + F11 | Lesezeichen setzen und ganze Datei schützen |
 
 ## Auf geringe Belastung ausgelegt
 
@@ -67,12 +77,12 @@ cd ScreenDash
 .\build.ps1
 ```
 
-Das Skript führt 32 Speicher-/Einstellungstests, 25 Zustands-/Planungs-/Zeitprüfungen und 32 Prozess-/Medienprüfungen und 7 Controller-Ablaufprüfungen ohne Aufnahme aus und baut die portable App nach `dist`. GitHub Actions führt dieselben Tests auf Windows aus und erzeugt ein Build-Artefakt. Die geprüfte Windows-Version steht in den Releases.
+Das Skript führt 177 Prüfungen für Speicher, Lesezeichen, Zustände, Medien, Audio, Spielerkennung, Profile und Updates ohne Aufnahme aus und baut die portable App nach `dist`. GitHub Actions führt dieselben Tests auf Windows aus und erzeugt ein Build-Artefakt. Die Windows-Version steht in den Releases.
 
 Zusätzliche Integrationstests benötigen einen interaktiven Windows-Desktop, einen Monitor, FFmpeg und gegebenenfalls ein Audiogerät. Sie zeichnen echte Bildschirminhalte auf und sind daher kein Bestandteil des CI-Laufs. Hinweise und Ergebnisse: [Testbericht](TESTBERICHT.de.md).
 
 ## Grenzen und Lizenzen
 
-Aufgenommen wird ein Monitor in seiner nativen Auflösung und der Ton eines Wiedergabegeräts; Mikrofonaufnahme ist nicht enthalten. Gerätewechsel, Remote-Sitzungen und geschützte Inhalte können die Aufnahme unterbrechen. Die letzten Sekunden eines bei einem Absturz offenen Abschnitts können verloren gehen. Weitere Details stehen in der [Anleitung](README.de.md).
+Aufgenommen wird ein Monitor in seiner nativen Auflösung, der Ton eines Wiedergabegeräts und auf Wunsch ein Mikrofon. Gerätewechsel, Remote-Sitzungen und geschützte Inhalte können die Aufnahme unterbrechen. Die letzten Sekunden eines bei einem Absturz offenen Abschnitts können verloren gehen. Weitere Details stehen in der [Anleitung](README.de.md).
 
 Der ScreenDash-Quellcode steht unter der [MIT-Lizenz](LICENSE). Für NAudio und die mitgelieferte .NET-Laufzeit gelten die [Drittanbieter-Lizenzen](Drittanbieter-Lizenzen.txt). FFmpeg wird nicht mitgeliefert und steht unter den Lizenzbedingungen der jeweils installierten Ausgabe.

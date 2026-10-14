@@ -38,7 +38,7 @@ var tests = new (string Name, Action Run)[]
     ,("large manual batch preserves notes until all targets validate", LargeManualBatch)
     ,("canceled list preserves recordings and metadata", CanceledList)
     ,("canceled list does not wait for another store operation", CanceledListWaitingForStore)
-};
+}.Concat(BookmarkChecks.All).ToArray();
 var failures = 0;
 foreach (var test in tests)
 {

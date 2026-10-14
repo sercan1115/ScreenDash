@@ -1,6 +1,6 @@
-# ScreenDash 1.3
+# ScreenDash 1.4
 
-Die Neuerungen und Hinweise zum Update stehen in `NEU-IN-1.3.de.md`.
+Die Neuerungen und Hinweise zum Update stehen in `NEU-IN-1.4.de.md`.
 
 Eine lokale Bildschirm-Dashcam für Windows 10/11 (64 Bit). Sie nimmt **einen ausgewählten Monitor und den Ton eines Windows-Wiedergabegeräts** auf. Alle Videos bleiben auf deinem PC.
 
@@ -14,6 +14,14 @@ Eine lokale Bildschirm-Dashcam für Windows 10/11 (64 Bit). Sie nimmt **einen au
 FFmpeg muss separat installiert sein. Die App sucht `ffmpeg.exe` neben der EXE, unter `tools/ffmpeg.exe` und im Windows-PATH. Installiere eine aktuelle Windows-Ausgabe mit `ddagrab` und Hardware-Encodern, etwa über `winget install --id Gyan.FFmpeg -e`. Anschließend ScreenDash neu öffnen; bei Bedarf `ffmpeg.exe` neben die App legen. FFmpeg ist nicht in diesem Paket enthalten.
 
 ## Enthaltene Funktionen
+
+- **Lesezeichen:** während der Aufnahme mit **Strg + Alt + F11** einen Moment markieren. Die ganze zugehörige Datei wird geschützt. Unter **Aufnahmen → Lesezeichen** benennen, entfernen oder nach dem Stoppen/Pausieren einen Clip mit wählbarer Zeit vor und nach dem Moment exportieren. Lesezeichen liegen in einer `.bookmarks.json` neben der MKV; beim Verschieben mitnehmen. Entfernen eines Lesezeichens hebt den Dateischutz nicht auf.
+- **Spielerkennung:** unter **Werkzeuge → Spielerkennung** genaue Programmnamen auswählen und ausdrücklich einschalten. Prüfung etwa alle sechs Sekunden, nur in deiner Windows-Sitzung. Nach Spielende wird eine von der Automatik gestartete Aufnahme nach mindestens zehn Sekunden Wartezeit geschlossen. Manuell gestartete Aufnahmen werden durch Spielende nicht gestoppt. Nach manuellem Stopp startet die Automatik erst wieder, wenn alle ausgewählten Spiele beendet waren. PC-Sperre, Standby, Speichergrenzen und Timer gelten weiterhin.
+- **Eigene Aufnahmeprofile:** unter **Werkzeuge → Aufnahmeprofile** Bildschirm, Audio, Mikrofon, Encoder und Qualität speichern. Anwenden setzt die Aufnahme-Einstellungen bei gestoppter Aufnahme; Speicherregeln, Autostart und Spielerkennung bleiben erhalten.
+- **Tonwarnungen:** bei längerer Stille erscheint ein Hinweis auf das Wiedergabegerät. Wartezeit 10–600 Sekunden, standardmäßig 30. Stille ist kein Nachweis eines Fehlers; bei Bedarf ausschalten. Gerätefehler werden gesondert angezeigt.
+- **Optionales Mikrofon:** ausdrücklich in den Audio-Einstellungen einschalten. Spielton und Mikrofon lassen sich einzeln auf 0–200 % stellen und werden in einer gemeinsamen AAC-Tonspur gespeichert. Mikrofon allein ist ebenfalls möglich. Windows muss Mikrofonzugriff für Desktop-Apps erlauben; ein Limiter begrenzt Übersteuerung.
+- **Updates:** unter **Werkzeuge → Updates** manuell bei GitHub prüfen, herunterladen, abbrechen und nach Prüfsummenprüfung zur neuen Version wechseln. Eine laufende Aufnahme wird zuvor geschlossen, ein Export abgebrochen. Die neue portable EXE startet aus einem eigenen Ordner unter `%LOCALAPPDATA%\ScreenDash\updates`; Einstellungen und Videos bleiben erhalten. Aktivierter Windows-Autostart wird angepasst. Alte manuelle Verknüpfungen zeigen weiter auf die alte EXE. Die App prüft nicht automatisch im Hintergrund auf Updates.
+- **Datum und Uhrzeit:** unter **Aufnahmen → Zeitpunkt** einen Moment eingeben, die passende Datei finden und einen Clip vorbereiten. Es zählen lokale Uhrzeit und der gespeicherte Aufnahmebeginn; Zeitsprünge oder manuell veränderte Dateizeiten können die Zuordnung verschieben. Für Medienmetadaten ist FFprobe erforderlich.
 
 - **Clip-Werkzeug:** abgeschlossene Aufnahmen als Ausschnitt kopieren; Start und Länge wählen oder die letzten 30 Sekunden, eine Minute oder fünf Minuten verwenden. Bild und Ton werden ohne Neukodierung exportiert. Schlüsselbilder können den Schnitt etwas verschieben. FFprobe aus dem vollständigen FFmpeg-Paket ist dafür erforderlich.
 - **Aufnahme-Timer:** optional nach 1 bis 1440 aktiven Aufnahmeminuten stoppen. Pausen zählen nicht. Der sichtbare Countdown wird alle zwei Sekunden geprüft. Standardmäßig ausgeschaltet.
@@ -36,6 +44,7 @@ FFmpeg muss separat installiert sein. Die App sucht `ffmpeg.exe` neben der EXE, 
 | Strg + Alt + F8 | Aufnahme starten / stoppen |
 | Strg + Alt + F9 | Letzte eingestellte Minuten schützen |
 | Strg + Alt + F10 | Aufnahme pausieren / fortsetzen |
+| Strg + Alt + F11 | Moment markieren und gesamte Datei schützen |
 
 ## Geringe Belastung
 
@@ -47,7 +56,7 @@ Es gibt keine laufende Videovorschau. Die Oberfläche aktualisiert sich alle zwe
 
 ## Ton und Grenzen
 
-Der Systemton wird über WASAPI vom ausgewählten Wiedergabegerät aufgenommen, beispielsweise Lautsprecher oder HDMI/DisplayPort-Audio. Ein Monitor ohne eigenes Audiogerät liefert keinen separaten Ton. **Automatisch · aktive Audioausgabe** bevorzugt beim Start ein Gerät mit laufendem Ton, sonst den Windows-Standard. Starte das Spiel vorher oder wähle dessen Headset/Lautsprecher ausdrücklich. **Ton testen** prüft fünf Sekunden lang die gewählte Ausgabe; **Mixer öffnen** hilft, die Spielausgabe zu finden. Pegel und tatsächliche Quelle erscheinen während der Aufnahme im Dashboard. Die separate Option **Windows-Standardausgabe** wird beim Aufnahmestart aufgelöst; wechselst du später das Standardgerät, Aufnahme stoppen und erneut starten oder das gewünschte Gerät ausdrücklich wählen. Ein Mikrofon wird nicht aufgenommen. Es werden nicht mehrere Ausgaben gemischt oder Geräte mitten in einer Aufnahme gewechselt. Exklusiver Audiomodus und geschützte Inhalte können Loopback-Ton verhindern.
+Der Systemton wird über WASAPI vom ausgewählten Wiedergabegerät aufgenommen, beispielsweise Lautsprecher oder HDMI/DisplayPort-Audio. Ein Monitor ohne eigenes Audiogerät liefert keinen separaten Ton. **Automatisch · aktive Audioausgabe** bevorzugt beim Start ein Gerät mit laufendem Ton, sonst den Windows-Standard. Starte das Spiel vorher oder wähle dessen Headset/Lautsprecher ausdrücklich. **Ton testen** prüft fünf Sekunden lang die gewählte Ausgabe; **Mixer öffnen** hilft, die Spielausgabe zu finden. Pegel und tatsächliche Quelle erscheinen während der Aufnahme im Dashboard. Die separate Option **Windows-Standardausgabe** wird beim Aufnahmestart aufgelöst; wechselst du später das Standardgerät, Aufnahme stoppen und erneut starten oder das gewünschte Gerät ausdrücklich wählen. Das optionale Mikrofon ist anfangs ausgeschaltet. Es werden nicht mehrere Wiedergabeausgaben gemischt oder Geräte mitten in einer Aufnahme gewechselt. Exklusiver Audiomodus und geschützte Inhalte können Loopback-Ton verhindern.
 
 Die Aufnahme erfolgt in der nativen Monitorauflösung. Sehr große oder mehrere GPU-Adapter können mehr Ressourcen beanspruchen. Monitorwechsel, entfernte Desktop-Sitzungen, exklusiv verwendete Audiogeräte oder Geräteunterbrechungen können die Aufnahme stoppen. Geschützte Video-Inhalte und der Windows-Sicherheitsbildschirm sind nicht zuverlässig aufnehmbar. Der Sparmodus ist für Dokumentation gedacht, nicht für flüssige 60-fps-Spielmitschnitte.
 
@@ -55,7 +64,7 @@ Die Aufnahme erfolgt in der nativen Monitorauflösung. Sehr große oder mehrere 
 
 Standard-Aufnahmeordner: Windows-Videos-Ordner / `ScreenDash`.
 
-Einstellungen: `%LOCALAPPDATA%\ScreenDash\settings.json`. Protokolle: `%LOCALAPPDATA%\ScreenDash\logs`. Die Bereinigung betrifft nur direkt im Aufnahmeordner liegende Dateien mit dem ScreenDash-Aufnahmenamen. Andere Dateien, Unterordner und Exporte werden nicht bereinigt. Verknüpfte Aufnahmeordner werden für eine eindeutige Speicherverwaltung abgewiesen.
+Einstellungen: `%LOCALAPPDATA%\ScreenDash\settings.json`. Profile: `%LOCALAPPDATA%\ScreenDash\profiles.json`. Protokolle: `%LOCALAPPDATA%\ScreenDash\logs`. Die Bereinigung betrifft nur direkt im Aufnahmeordner liegende Dateien mit dem ScreenDash-Aufnahmenamen. Andere Dateien, Unterordner und Exporte werden nicht bereinigt. Verknüpfte Aufnahmeordner werden für eine eindeutige Speicherverwaltung abgewiesen.
 
 ## Quellcode bauen
 

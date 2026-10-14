@@ -4,7 +4,7 @@ using System.Text;
 
 namespace ScreenDash;
 
-/// <summary>Desktop Duplication + hardware H.264, segmented Matroska, and bounded playback loopback.</summary>
+/// <summary>Desktop Duplication + hardware H.264, Matroska, and bounded optional WASAPI audio sources.</summary>
 public sealed class Recorder : IDisposable
 {
     private sealed record Encoder(string Name, string Codec, string VideoFilters, string[] Options);
@@ -18,6 +18,9 @@ public sealed class Recorder : IDisposable
     private volatile RecorderStatus _status = new(false, "", "Bereit", 0, 0, null);
     private Process? _process;
     private AudioLoopback? _audio;
+    private MicrophoneCapture? _microphone;
+    private Action<Exception>? _audioFaultHandler;
+    private Action<Exception>? _microphoneFaultHandler;
     private Task? _stderrTask;
     private Task? _progressTask;
     private CancellationTokenSource? _startCancellation;
@@ -25,6 +28,9 @@ public sealed class Recorder : IDisposable
     private volatile bool _intentionalStop;
     private int _disposed;
     private string? _failure;
+    private string _audioWarning = "";
+    private long _audioGeneration;
+    private bool _audioFaulted;
     private static readonly object LogLock = new();
 
     public event Action<RecorderStatus>? Changed;
@@ -78,9 +84,16 @@ public sealed class Recorder : IDisposable
             if (Directory.EnumerateFiles(options.RecordingDirectory, sessionPrefix + "_*.mkv").Any())
                 throw new IOException("Der Dateiname dieser Aufnahmesitzung wird bereits verwendet.");
             var executable = FindFfmpeg();
-            _failure = null;
             _intentionalStop = false;
-            lock (_errorLock) _stderr.Clear();
+            long audioGeneration;
+            lock (_errorLock)
+            {
+                _failure = null;
+                _audioWarning = "";
+                _audioFaulted = false;
+                audioGeneration = ++_audioGeneration;
+                _stderr.Clear();
+            }
             Publish(new(false, "", "Hardware-Encoder wird mit dem ausgewählten Bildschirm geprüft …", 0, 0, null));
             var encoder = await SelectEncoderAsync(executable, options, display, startup.Token).ConfigureAwait(false);
             startup.Token.ThrowIfCancellationRequested();
@@ -91,14 +104,49 @@ public sealed class Recorder : IDisposable
             _firstFrame = new(TaskCreationOptions.RunContinuationsAsynchronously);
             if (options.AudioEnabled)
             {
-                _audio = new AudioLoopback(options.AudioDeviceId);
-                _audio.Faulted += AudioFailed;
+                try
+                {
+                    _audio = new AudioLoopback(options.AudioDeviceId);
+                    _audioFaultHandler = ex => AudioSourceFailed(audioGeneration, "Systemton", ex);
+                    _audio.Faulted += _audioFaultHandler;
+                }
+                catch (Exception ex)
+                {
+                    _audioWarning = "Systemton nicht verfügbar: " + ex.Message;
+                    throw new IOException(_audioWarning + " Das ausgewählte Ausgabegerät prüfen.", ex);
+                }
+            }
+            if (options.MicrophoneEnabled)
+            {
+                try
+                {
+                    _microphone = new MicrophoneCapture(options.MicrophoneDeviceId);
+                    _microphoneFaultHandler = ex => AudioSourceFailed(audioGeneration, "Mikrofon", ex);
+                    _microphone.Faulted += _microphoneFaultHandler;
+                }
+                catch (Exception ex)
+                {
+                    _audioWarning = "Mikrofon nicht verfügbar: " + ex.Message;
+                    throw new IOException(_audioWarning + " Windows-Mikrofonzugriff und ausgewähltes Gerät prüfen.", ex);
+                }
             }
             // Both streams use this epoch. Audio is numbered continuously from zero, including silent gaps.
             var startedUtc = DateTime.UtcNow;
             var originMicroseconds = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
-            _audio?.Start();
-            var args = BuildArguments(options, display, encoder, _audio, sessionPrefix, originMicroseconds, false);
+            var captureClock = Stopwatch.StartNew();
+            try { _audio?.Start(captureClock); }
+            catch (Exception ex)
+            {
+                _audioWarning = "Systemtonaufnahme kann nicht starten: " + ex.Message;
+                throw new IOException(_audioWarning, ex);
+            }
+            try { _microphone?.Start(captureClock); }
+            catch (Exception ex)
+            {
+                _audioWarning = "Mikrofonaufnahme kann nicht starten: " + ex.Message;
+                throw new IOException(_audioWarning + " Windows-Mikrofonzugriff prüfen.", ex);
+            }
+            var args = BuildArguments(options, display, encoder, _audio, sessionPrefix, originMicroseconds, false, _microphone);
             var process = new Process { StartInfo = CreateStartInfo(executable, args) };
             _process = process;
             if (!process.Start()) throw new IOException("FFmpeg konnte nicht gestartet werden.");
@@ -176,7 +224,7 @@ public sealed class Recorder : IDisposable
     }
 
     private static List<string> BuildArguments(AppSettings s, DisplaySource display, Encoder encoder,
-        AudioLoopback? audio, string prefix, long originMicroseconds, bool probe)
+        AudioLoopback? audio, string prefix, long originMicroseconds, bool probe, MicrophoneCapture? microphone = null)
     {
         var args = new List<string>
         {
@@ -192,15 +240,23 @@ public sealed class Recorder : IDisposable
                 "-f", audio.RawFormat, "-ar", audio.SampleRate.ToString(CultureInfo.InvariantCulture),
                 "-ac", audio.Channels.ToString(CultureInfo.InvariantCulture), "-i", audio.PipePath]);
         }
+        if (microphone is not null)
+        {
+            args.AddRange(["-thread_queue_size", "64", "-probesize", "32", "-analyzeduration", "0",
+                "-f", microphone.RawFormat, "-ar", microphone.SampleRate.ToString(CultureInfo.InvariantCulture),
+                "-ac", microphone.Channels.ToString(CultureInfo.InvariantCulture), "-i", microphone.PipePath]);
+        }
         var graph = $"ddagrab=output_idx={display.OutputIndex}:framerate={s.Fps}:draw_mouse={(s.CaptureCursor ? 1 : 0)}:output_fmt=bgra";
         // Align the first frame to the audio epoch, then use ddagrab's monotonic clock.
         // A later Windows clock correction must not jump the video's timestamps.
         graph += probe ? ",setpts=PTS-STARTPTS"
             : $",setpts='if(eq(N,0),(RTCTIME-{originMicroseconds})/(1000000*TB),PREV_OUTPTS+PTS-PREV_INPTS)'";
         graph += encoder.VideoFilters + "[screen]";
+        var audioGraph = BuildAudioFilterGraph(audio is not null, microphone is not null, s.SystemGainPercent, s.MicrophoneGainPercent);
+        if (audioGraph.Length > 0) graph += ";" + audioGraph;
         args.AddRange(["-filter_complex", graph, "-map", "[screen]"]);
-        if (audio is not null)
-            args.AddRange(["-map", "0:a:0", "-c:a", "aac", "-b:a", "128k", "-ac", "2", "-ar", "48000"]);
+        if (audioGraph.Length > 0)
+            args.AddRange(["-map", "[sound]", "-c:a", "aac", "-b:a", "128k", "-ac", "2", "-ar", "48000"]);
         else args.Add("-an");
         args.AddRange(["-c:v", encoder.Codec]);
         args.AddRange(encoder.Options);
@@ -220,6 +276,30 @@ public sealed class Recorder : IDisposable
                 Path.Combine(s.RecordingDirectory, prefix + "_%06d.mkv")]);
         }
         return args;
+    }
+
+    private static string BuildAudioFilterGraph(bool systemAudio, bool microphone, int systemGain, int microphoneGain)
+    {
+        if (systemGain is < 0 or > 200 || microphoneGain is < 0 or > 200)
+            throw new ArgumentOutOfRangeException(nameof(systemGain), "Audiolautstärke muss zwischen 0 und 200 % liegen.");
+        if (!systemAudio && !microphone) return "";
+        var graph = new List<string>();
+        var inputs = new List<string>();
+        void AddSource(int input, int gain, string label)
+        {
+            // Both bounded pipes start at the same monotonic epoch. Drift correction handles
+            // differing hardware rates; stereo and sample-rate conversion happen before mixing.
+            graph.Add($"[{input}:a:0]aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo,volume={(gain / 100.0).ToString("0.##", CultureInfo.InvariantCulture)}[{label}]");
+            inputs.Add("[" + label + "]");
+        }
+        if (systemAudio) AddSource(0, systemGain, "systemaudio");
+        if (microphone) AddSource(systemAudio ? 1 : 0, microphoneGain, "microphoneaudio");
+        var joined = string.Concat(inputs);
+        // Disabling normalization preserves game volume when the microphone is silent.
+        // The limiter prevents clipping without automatically boosting quiet recordings.
+        var mix = inputs.Count == 2 ? "amix=inputs=2:duration=longest:dropout_transition=0:normalize=0," : "";
+        graph.Add(joined + mix + "alimiter=limit=0.95:level=false:latency=true[sound]");
+        return string.Join(';', graph);
     }
 
     private static ProcessStartInfo CreateStartInfo(string executable, IEnumerable<string> arguments)
@@ -282,6 +362,7 @@ public sealed class Recorder : IDisposable
     {
         long frames = 0;
         double fps = 0;
+        var videoElapsed = TimeSpan.Zero;
         try
         {
             while (await process.StandardOutput.ReadLineAsync().ConfigureAwait(false) is { } line)
@@ -292,12 +373,14 @@ public sealed class Recorder : IDisposable
                 var value = line[(separator + 1)..];
                 if (key == "frame" && long.TryParse(value, out var parsedFrames)) frames = parsedFrames;
                 else if (key == "fps" && double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsedFps)) fps = parsedFps;
+                else if (key == "out_time_us" && long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var microseconds))
+                    videoElapsed = TimeSpan.FromTicks(Math.Clamp(microseconds, 0, TimeSpan.MaxValue.Ticks / 10) * 10);
                 else if (key == "progress")
                 {
                     if (ReferenceEquals(_process, process))
                     {
                         if (frames > 0) firstFrame.TrySetResult(true);
-                        Publish(new(!_intentionalStop && frames > 0, encoder, _intentionalStop ? "Aufnahme wird beendet …" : "Aufnahme läuft", fps, frames, startedUtc));
+                        Publish(new(!_intentionalStop && frames > 0, encoder, _intentionalStop ? "Aufnahme wird beendet …" : "Aufnahme läuft", fps, frames, startedUtc, VideoElapsed: videoElapsed));
                     }
                 }
             }
@@ -328,21 +411,41 @@ public sealed class Recorder : IDisposable
         catch (Exception ex) { WriteLog("Exit observer: " + ex.Message); }
     }
 
-    private void AudioFailed(Exception ex)
+    private void AudioSourceFailed(long generation, string source, Exception ex)
     {
         if (_intentionalStop || IsExited(_process)) return;
-        _failure = "Audioaufnahme fehlgeschlagen: " + ex.Message;
-        WriteLog(_failure);
-        _firstFrame?.TrySetException(new IOException(_failure, ex));
-        _ = StopAfterFailureAsync();
+        string failure;
+        TaskCompletionSource<bool>? firstFrame;
+        lock (_errorLock)
+        {
+            // A disconnected headset can fault loopback and microphone together. Handle one
+            // fault per session; an old callback must never stop a newly started recording.
+            if (generation != _audioGeneration || _audioFaulted) return;
+            _audioFaulted = true;
+            _audioWarning = source + " ausgefallen: " + ex.Message;
+            _failure = "Audioaufnahme fehlgeschlagen: " + _audioWarning;
+            failure = _failure;
+            firstFrame = _firstFrame;
+        }
+        WriteLog(failure);
+        firstFrame?.TrySetException(new IOException(failure, ex));
+        _ = StopAfterFailureAsync(generation);
     }
 
-    private async Task StopAfterFailureAsync()
+    private async Task StopAfterFailureAsync(long generation)
     {
         try
         {
-            await StopAsync().ConfigureAwait(false);
-            if (_failure is { } message) Publish(_status with { Message = message });
+            await _lifecycle.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                if (generation != _audioGeneration) return;
+                _intentionalStop = true;
+                await StopResourcesAsync().ConfigureAwait(false);
+                SessionPrefix = null;
+                Publish(_status with { Recording = false, Fps = 0, Message = _failure ?? "Audioaufnahme beendet" });
+            }
+            finally { _lifecycle.Release(); }
         }
         catch (Exception ex) { WriteLog("Audio shutdown: " + ex.Message); }
     }
@@ -389,10 +492,30 @@ public sealed class Recorder : IDisposable
         _audio = null;
         if (audio is not null)
         {
-            audio.Faulted -= AudioFailed;
-            await audio.StopAsync().ConfigureAwait(false);
-            audio.Dispose();
+            audio.Faulted -= _audioFaultHandler;
+            try { await audio.StopAsync().ConfigureAwait(false); }
+            catch (Exception ex) { WriteLog("System audio shutdown: " + ex.Message); }
+            finally
+            {
+                try { audio.Dispose(); }
+                catch (Exception ex) { WriteLog("System audio disposal: " + ex.Message); }
+            }
         }
+        _audioFaultHandler = null;
+        var microphone = _microphone;
+        _microphone = null;
+        if (microphone is not null)
+        {
+            microphone.Faulted -= _microphoneFaultHandler;
+            try { await microphone.StopAsync().ConfigureAwait(false); }
+            catch (Exception ex) { WriteLog("Microphone shutdown: " + ex.Message); }
+            finally
+            {
+                try { microphone.Dispose(); }
+                catch (Exception ex) { WriteLog("Microphone disposal: " + ex.Message); }
+            }
+        }
+        _microphoneFaultHandler = null;
         if (_stderrTask is not null) { try { await _stderrTask.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false); } catch { } }
         if (_progressTask is not null) { try { await _progressTask.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false); } catch { } }
         _process = null;
@@ -481,8 +604,11 @@ public sealed class Recorder : IDisposable
     }
     private void Publish(RecorderStatus status)
     {
-        if (status.Recording && _audio is { } audio)
-            status = status with { AudioPeak = audio.PeakLevel, AudioDevice = audio.DeviceName };
+        if (_audio is { } audio)
+            status = status with { AudioPeak = status.Recording ? audio.PeakLevel : 0, AudioDevice = audio.DeviceName };
+        if (_microphone is { } microphone)
+            status = status with { MicrophonePeak = status.Recording ? microphone.PeakLevel : 0, MicrophoneDevice = microphone.DeviceName };
+        status = status with { AudioWarning = _audioWarning };
         _status = status;
         try { Changed?.Invoke(status); } catch (Exception ex) { WriteLog("Status observer: " + ex.Message); }
     }
@@ -490,6 +616,8 @@ public sealed class Recorder : IDisposable
     {
         if (s.Fps is < 1 or > 60 || s.VideoBitrateKbps is < 250 or > 100000 || s.SegmentMinutes is < 1 or > 60)
             throw new ArgumentException("Ungültige Bildrate, Bitrate oder Segmentlänge.");
+        if (s.SystemGainPercent is < 0 or > 200 || s.MicrophoneGainPercent is < 0 or > 200)
+            throw new ArgumentException("Audiolautstärke muss zwischen 0 und 200 % liegen.");
         if (display.AdapterIndex < 0 || display.OutputIndex < 0 || display.Width <= 0 || display.Height <= 0)
             throw new ArgumentException("Ungültiger Bildschirm.");
         if (string.IsNullOrWhiteSpace(prefix) || prefix.Any(c => !char.IsAsciiLetterOrDigit(c) && c != '_'))

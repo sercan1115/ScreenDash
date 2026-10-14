@@ -4,7 +4,7 @@ using Microsoft.Win32;
 
 namespace ScreenDash;
 
-public sealed class AppController : IAppController
+public sealed partial class AppController : IAppController
 {
     private readonly Recorder _recorder = new();
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -45,14 +45,18 @@ public sealed class AppController : IAppController
             var elapsed = armed ? _recordingClock.Elapsed : TimeSpan.Zero;
             return new(_recordStatus.Recording, _busy || (_initializing && !armed), _message, _recordStatus.Encoder, elapsed,
                 _cpu, _memory, _recordStatus.Fps, _storage, armed, _session.Paused, _session.PauseReason, _recordStatus.AudioPeak, _recordStatus.AudioDevice,
-                RecordingTimer.Remaining(_settings.AutoStopMinutes, elapsed, armed));
+                RecordingTimer.Remaining(_settings.AutoStopMinutes, elapsed, armed), _recordStatus.MicrophonePeak, _recordStatus.MicrophoneDevice,
+                string.IsNullOrEmpty(_recordStatus.AudioWarning) ? _silenceWarning : _recordStatus.AudioWarning);
         }
     }
     public event Action? Changed;
     public event Action<string>? Notice;
 
-    public AppController(AppSettings? initialSettings = null)
+    public AppController(AppSettings? initialSettings = null, ProfileLibrary? profiles = null, GameDetection? games = null, UpdateService? updates = null)
     {
+        _profileLibrary = profiles ?? new ProfileLibrary();
+        _gameDetection = games ?? new GameDetection();
+        _updates = updates ?? new UpdateService();
         _settings = initialSettings is null ? SettingsStore.Load() : SettingsStore.Validate(initialSettings);
         try { _store = new RecordingStore(_settings.RecordingDirectory); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
@@ -67,6 +71,8 @@ public sealed class AppController : IAppController
         catch (Exception ex) { AppLog.Write(ex); _displays = []; _message = "Bildschirme konnten nicht erkannt werden. Bitte Geräte in den Einstellungen aktualisieren."; }
         try { _audioDevices = AudioLoopback.GetDevices(); }
         catch (Exception ex) { AppLog.Write(ex); _audioDevices = []; }
+        try { _microphones = MicrophoneCapture.GetDevices(); }
+        catch (Exception ex) { AppLog.Write(ex); _microphones = []; }
         _session.SetPrivacy(false, false, _settings.PauseOnLock);
         if (_message == "Bereit für die erste Aufnahme") _message = "Speicher wird im Hintergrund geprüft …";
         _recorder.Changed += OnRecorderChanged;
@@ -85,6 +91,7 @@ public sealed class AppController : IAppController
             if (stopRequest != Interlocked.Read(ref _stopRequests)) return;
             if (_session.Armed || _recordStatus.Recording)
             {
+                SuppressGameRestart();
                 _session.Stop();
                 await StopCoreAsync("Aufnahme gestoppt");
             }
@@ -103,6 +110,7 @@ public sealed class AppController : IAppController
     public async Task StopAsync()
     {
         Interlocked.Increment(ref _stopRequests);
+        SuppressGameRestart();
         _session.Stop(); CancelPendingStart();
         await _gate.WaitAsync(_lifetime.Token);
         try { _session.Stop(); await StopCoreAsync("Aufnahme gestoppt"); }
@@ -219,7 +227,9 @@ public sealed class AppController : IAppController
                 throw;
             }
             _store = candidateStore;
+            bool gamesChanged = _settings.GameDetectionEnabled != validated.GameDetectionEnabled || !_settings.GameExecutables.SequenceEqual(validated.GameExecutables);
             _settings = validated;
+            if (gamesChanged) lock (_gameGate) { _gameDetection.Reset(); _gameRecordingOwned = false; _gameExitCounter = null; }
             _session.SetPrivacy(_locked, _suspended, validated.PauseOnLock);
             SetStorage(await Task.Run(() => _store.Cleanup(validated)));
             _message = "Einstellungen gespeichert";
@@ -240,7 +250,8 @@ public sealed class AppController : IAppController
     {
         var displays = await Task.Run(DisplayCatalog.GetDisplays);
         var audio = await Task.Run(AudioLoopback.GetDevices);
-        _displays = displays; _audioDevices = audio; Publish();
+        var microphones = await Task.Run(MicrophoneCapture.GetDevices);
+        _displays = displays; _audioDevices = audio; _microphones = microphones; Publish();
     }
 
     public async Task ProtectRecentAsync()
@@ -394,7 +405,7 @@ public sealed class AppController : IAppController
             {
                 if (_session.CanRecover(generation))
                 {
-                    _session.Stop();
+                    SuppressGameRestart(); _session.Stop();
                     _message = "Aufnahme nach drei fehlgeschlagenen Neustarts gestoppt. Prüfe Bildschirm/Tongerät und das Protokoll.";
                     ShowNotice(_message); Publish();
                 }
@@ -451,7 +462,7 @@ public sealed class AppController : IAppController
                 {
                     try { await StartCoreAsync(); }
                     catch (OperationCanceledException) when (!_disposed) { HandleCanceledStart(); }
-                    catch (Exception ex) { _session.Stop(); ShowNotice(ex.Message); }
+                    catch (Exception ex) { SuppressGameRestart(); _session.Stop(); ShowNotice(ex.Message); }
                 }
                 else if (_session.Paused) _message = "Pausiert · " + _session.PauseReason;
             }
@@ -472,7 +483,10 @@ public sealed class AppController : IAppController
             while (await timer.WaitForNextTickAsync(_lifetime.Token))
             {
                 SamplePerformance();
+                CheckSilenceWarning();
                 tick++;
+                if (tick % 3 == 0 && _settings.GameDetectionEnabled && (_gameTask is null || _gameTask.IsCompleted))
+                    _gameTask = CheckGamesAsync();
                 if (!_busy && _session.Armed && RecordingTimer.HasExpired(_settings.AutoStopMinutes, _recordingClock.Elapsed)
                     && await _gate.WaitAsync(0, _lifetime.Token))
                 {
@@ -480,7 +494,7 @@ public sealed class AppController : IAppController
                     {
                         if (_session.Armed && RecordingTimer.HasExpired(_settings.AutoStopMinutes, _recordingClock.Elapsed))
                         {
-                            _session.Stop();
+                            SuppressGameRestart(); _session.Stop();
                             await StopCoreAsync("Zeitlimit erreicht · Aufnahme automatisch gestoppt");
                             ShowNotice(_message);
                         }
@@ -518,7 +532,7 @@ public sealed class AppController : IAppController
                 SetStorage(result);
                 if (!_storage.CanRecord && _session.Armed)
                 {
-                    _session.Stop(); CancelPendingStart();
+                    SuppressGameRestart(); _session.Stop(); CancelPendingStart();
                     await StopCoreAsync(_storage.Message); ShowNotice(_storage.Message);
                 }
                 else if (!_storage.CanRecord || (initial && _message == "Speicher wird im Hintergrund geprüft …"))

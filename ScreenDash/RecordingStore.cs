@@ -10,7 +10,7 @@ using Microsoft.Win32.SafeHandles;
 namespace ScreenDash;
 
 /// <summary>Owns only ScreenDash segment files directly inside one local, non-reparse directory.</summary>
-public sealed class RecordingStore
+public sealed partial class RecordingStore
 {
     private static readonly Regex SegmentName = new(
         @"\Ascreendash_(?<stamp>[0-9]{8}T[0-9]{9}Z)_(?<id>[0-9a-fA-F]{8})_(?<sequence>[0-9]{6})\.mkv\z",
@@ -92,7 +92,7 @@ public sealed class RecordingStore
                 // Cover the controller's 10-second check interval plus bitrate/muxing variance.
                 // This is an estimate: encoder spikes still need the periodic stop check.
                 var headroom = Math.Max(8L * 1024 * 1024,
-                    (long)Math.Ceiling((validated.VideoBitrateKbps + (validated.AudioEnabled ? 128 : 0)) * 1000d / 8 * 15 * 1.25));
+                    (long)Math.Ceiling((validated.VideoBitrateKbps + (validated.AudioEnabled || validated.MicrophoneEnabled ? 128 : 0)) * 1000d / 8 * 15 * 1.25));
 
                 foreach (var entry in scan.Entries.OrderBy(e => e.CompletedUtc).ThenBy(e => e.Path, StringComparer.Ordinal))
                 {
@@ -493,7 +493,7 @@ public sealed class RecordingStore
     {
         // Never remove a marker while its video still exists. Only these exact suffixes belong to us.
         if (File.Exists(videoPath)) return;
-        foreach (var suffix in new[] { ".keep", ".note.json" })
+        foreach (var suffix in new[] { ".keep", ".note.json", ".bookmarks.json" })
         {
             try
             {

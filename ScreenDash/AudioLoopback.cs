@@ -9,14 +9,14 @@ namespace ScreenDash;
 public sealed class AudioLoopback : IDisposable
 {
     private readonly MMDevice _device;
-    private readonly WasapiLoopbackCapture _capture;
+    private readonly WasapiCapture _capture;
     private readonly NamedPipeServerStream _pipe;
     private readonly CancellationTokenSource _shutdown = new();
     private readonly object _ringLock = new();
-    private readonly byte[] _ring;
-    private readonly long[] _positions;
-    private readonly Stopwatch _clock = new();
-    private readonly int _capacityFrames;
+    private readonly ClockedAudioBuffer _ring;
+    private Stopwatch _clock = new();
+    private readonly bool _microphone;
+    private readonly string _deviceName;
     private long _lastCaptureEnd;
     private Task? _pump;
     private int _stopping;
@@ -30,8 +30,8 @@ public sealed class AudioLoopback : IDisposable
     public int Channels => _capture.WaveFormat.Channels;
     public string RawFormat { get; }
     public string PipePath { get; }
-    public string DeviceName => _device.FriendlyName;
-    public double PeakLevel => Stopwatch.GetElapsedTime(Interlocked.Read(ref _lastAudioPacket)).TotalSeconds < 1 ? _peak : 0;
+    public string DeviceName => _deviceName;
+    public double PeakLevel => Stopwatch.GetElapsedTime(Interlocked.Read(ref _lastAudioPacket)).TotalSeconds < 1 ? Volatile.Read(ref _peak) : 0;
 
     public static IReadOnlyList<AudioSource> GetDevices()
     {
@@ -44,28 +44,30 @@ public sealed class AudioLoopback : IDisposable
         return result;
     }
 
-    public AudioLoopback(string deviceId)
+    public AudioLoopback(string deviceId) : this(deviceId, false) { }
+
+    // Microphone and loopback share the bounded timeline implementation. Opening a microphone
+    // occurs only through MicrophoneCapture, after the user has explicitly enabled it.
+    internal AudioLoopback(string deviceId, bool microphone)
     {
+        _microphone = microphone;
         using var enumerator = new MMDeviceEnumerator();
         _device = string.IsNullOrEmpty(deviceId)
-            ? ResolveAutomaticDevice(enumerator)
+            ? microphone ? enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications) : ResolveAutomaticDevice(enumerator)
             : deviceId == "@windows-default" ? enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia)
             : enumerator.GetDevice(deviceId);
-        if (_device.DataFlow != DataFlow.Render || _device.State != DeviceState.Active)
-        {
-            _device.Dispose();
-            throw new InvalidOperationException("Das ausgewählte Wiedergabegerät ist nicht verfügbar.");
-        }
         try
         {
-            _capture = new WasapiLoopbackCapture(_device);
+            if (_device.DataFlow != (microphone ? DataFlow.Capture : DataFlow.Render) || _device.State != DeviceState.Active)
+                throw new InvalidOperationException(microphone ? "Das ausgewählte Mikrofon ist nicht verfügbar." : "Das ausgewählte Wiedergabegerät ist nicht verfügbar.");
+            // Cache the name while the endpoint is valid. Status updates must not query COM
+            // properties on a device that may have just been unplugged.
+            _deviceName = _device.FriendlyName;
+            _capture = microphone ? new WasapiCapture(_device) : new WasapiLoopbackCapture(_device);
             RawFormat = GetRawFormat(_capture.WaveFormat);
             if (SampleRate < 8000 || SampleRate > 192000 || Channels is < 1 or > 16)
-                throw new InvalidOperationException("Das Audioformat des Ausgabegerätes wird nicht unterstützt.");
-            _capacityFrames = checked(SampleRate * 2);
-            _ring = new byte[checked(_capacityFrames * _capture.WaveFormat.BlockAlign)];
-            _positions = new long[_capacityFrames];
-            Array.Fill(_positions, -1L);
+                throw new InvalidOperationException(microphone ? "Das Audioformat des Mikrofons wird nicht unterstützt." : "Das Audioformat des Ausgabegerätes wird nicht unterstützt.");
+            _ring = new ClockedAudioBuffer(checked(SampleRate * 2), _capture.WaveFormat.BlockAlign);
             var name = "ScreenDash-audio-" + Guid.NewGuid().ToString("N");
             PipePath = @"\\.\pipe\" + name;
             _pipe = new NamedPipeServerStream(name, PipeDirection.Out, 1, PipeTransmissionMode.Byte,
@@ -75,16 +77,19 @@ public sealed class AudioLoopback : IDisposable
         }
         catch
         {
-            _capture?.Dispose();
-            _device.Dispose();
+            try { _pipe?.Dispose(); } catch { }
+            try { _capture?.Dispose(); } catch { }
+            try { _device.Dispose(); } catch { }
+            _shutdown.Dispose();
             throw;
         }
     }
 
-    public void Start()
+    public void Start(Stopwatch? sharedClock = null)
     {
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
         if (_pump is not null) throw new InvalidOperationException("Audioaufnahme läuft bereits.");
+        if (sharedClock is not null) _clock = sharedClock;
         _clock.Start();
         _capture.StartRecording();
         _pump = Task.Run(PumpAsync);
@@ -109,7 +114,7 @@ public sealed class AudioLoopback : IDisposable
             };
             if (float.IsFinite(value)) peak = Math.Max(peak, value);
         }
-        _peak = Math.Clamp(peak, 0, 1);
+        Volatile.Write(ref _peak, Math.Clamp(peak, 0, 1));
         Interlocked.Exchange(ref _lastAudioPacket, Stopwatch.GetTimestamp());
         var align = _capture.WaveFormat.BlockAlign;
         var frames = e.BytesRecorded / align;
@@ -120,19 +125,7 @@ public sealed class AudioLoopback : IDisposable
             // Smooth callback scheduling jitter, but re-anchor after a genuine silent gap.
             if (_lastCaptureEnd > 0 && Math.Abs(start - _lastCaptureEnd) <= SampleRate / 20)
                 start = _lastCaptureEnd;
-            var skip = Math.Max(0, frames - _capacityFrames);
-            var firstSlot = (int)((start + skip) % _capacityFrames);
-            var retainedFrames = frames - skip;
-            var firstSpan = Math.Min(retainedFrames, _capacityFrames - firstSlot);
-            Buffer.BlockCopy(e.Buffer, skip * align, _ring, firstSlot * align, firstSpan * align);
-            if (firstSpan < retainedFrames)
-                Buffer.BlockCopy(e.Buffer, (skip + firstSpan) * align, _ring, 0, (retainedFrames - firstSpan) * align);
-            for (var i = skip; i < frames; i++)
-            {
-                var position = start + i;
-                var slot = (int)(position % _capacityFrames);
-                _positions[slot] = position;
-            }
+            _ring.Write(start, e.Buffer, frames);
             _lastCaptureEnd = start + frames;
         }
     }
@@ -140,7 +133,7 @@ public sealed class AudioLoopback : IDisposable
     private void OnStopped(object? sender, StoppedEventArgs e)
     {
         if (_stopping == 0)
-            Fail(e.Exception ?? new IOException("Die Audioaufnahme wurde vom Ausgabegerät beendet."));
+            Fail(e.Exception ?? new IOException(_microphone ? "Die Mikrofonaufnahme wurde vom Gerät beendet." : "Die Audioaufnahme wurde vom Ausgabegerät beendet."));
     }
 
     private async Task PumpAsync()
@@ -161,7 +154,7 @@ public sealed class AudioLoopback : IDisposable
                 {
                     nextDeviceCheck = _clock.Elapsed.TotalSeconds + 1;
                     if (_device.State != DeviceState.Active)
-                        throw new IOException("Das ausgewählte Audioausgabegerät wurde getrennt oder deaktiviert.");
+                        throw new IOException(_microphone ? "Das ausgewählte Mikrofon wurde getrennt oder deaktiviert." : "Das ausgewählte Audioausgabegerät wurde getrennt oder deaktiviert.");
                 }
                 // 120 ms lets callback batches arrive before filling a missing time span with silence.
                 var due = Math.Max(0, (long)((_clock.Elapsed.TotalSeconds - 0.12) * SampleRate));
@@ -169,24 +162,7 @@ public sealed class AudioLoopback : IDisposable
                 {
                     ct.ThrowIfCancellationRequested();
                     var count = (int)Math.Min(chunkFrames, due - writtenFrames);
-                    lock (_ringLock)
-                    {
-                        var firstSlot = (int)(writtenFrames % _capacityFrames);
-                        var firstSpan = Math.Min(count, _capacityFrames - firstSlot);
-                        Buffer.BlockCopy(_ring, firstSlot * align, output, 0, firstSpan * align);
-                        if (firstSpan < count)
-                            Buffer.BlockCopy(_ring, 0, output, firstSpan * align, (count - firstSpan) * align);
-                        var i = 0;
-                        while (i < count)
-                        {
-                            var position = writtenFrames + i;
-                            var slot = (int)(position % _capacityFrames);
-                            if (_positions[slot] == position) { i++; continue; }
-                            var missingStart = i++;
-                            while (i < count && _positions[(int)((writtenFrames + i) % _capacityFrames)] != writtenFrames + i) i++;
-                            Array.Clear(output, missingStart * align, (i - missingStart) * align);
-                        }
-                    }
+                    _ring.Read(writtenFrames, output, count);
                     await _pipe.WriteAsync(output.AsMemory(0, count * align), ct).ConfigureAwait(false);
                     writtenFrames += count;
                 }
@@ -201,6 +177,10 @@ public sealed class AudioLoopback : IDisposable
     {
         if (Interlocked.Exchange(ref _faulted, 1) != 0) return;
         try { Faulted?.Invoke(error); } catch { /* Observers cannot kill the WASAPI callback. */ }
+        // A lost endpoint must also close its pipe. Otherwise FFmpeg could remain blocked
+        // waiting for that source while the recorder tries to flush the final video packets.
+        try { _shutdown.Cancel(); } catch (ObjectDisposedException) { }
+        try { _pipe.Dispose(); } catch (IOException) { }
     }
 
     public async Task StopAsync()
@@ -259,11 +239,17 @@ public sealed class AudioLoopback : IDisposable
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
-        StopAsync().GetAwaiter().GetResult();
-        _capture.DataAvailable -= OnData;
-        _capture.RecordingStopped -= OnStopped;
-        _capture.Dispose();
-        _device.Dispose();
-        _shutdown.Dispose();
+        try { StopAsync().GetAwaiter().GetResult(); }
+        finally
+        {
+            _capture.DataAvailable -= OnData;
+            _capture.RecordingStopped -= OnStopped;
+            try { _capture.Dispose(); }
+            finally
+            {
+                try { _device.Dispose(); }
+                finally { _shutdown.Dispose(); }
+            }
+        }
     }
 }

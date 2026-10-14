@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../ScreenDash/Contracts.cs" Link="Contracts.cs" />
+    <Compile Include="../ScreenDash/SettingsStore.cs" Link="SettingsStore.cs" />
+    <Compile Include="../ScreenDash/AppLog.cs" Link="AppLog.cs" />
+    <Compile Include="../ScreenDash/GameDetection.cs" Link="GameDetection.cs" />
+    <Compile Include="../ScreenDash/ProfileLibrary.cs" Link="ProfileLibrary.cs" />
+    <Compile Include="../ScreenDash/UpdateService.cs" Link="UpdateService.cs" />
+  </ItemGroup>
+</Project>

@@ -1,5 +1,17 @@
 # ScreenDash – Prüfergebnis
 
+## Version 1.4 – 14. Oktober 2026
+
+- Die automatische Suite umfasst 177 Prüfungen ohne Aufnahme: 45 Speicher-/Einstellungs-/Lesezeichentests, 25 Zustands-/Planungsprüfungen, 32 Prozess-/Medienprüfungen, 7 Controller-Ablaufprüfungen, 34 Profil-/Spielerkennungs-/Updateprüfungen, 16 Audiopuffer-/Fehlerprüfungen und 18 Controller-Funktionsprüfungen. Die 45 Speichertests bestanden im uneingeschränkten Lauf. Beim späteren Lauf in der eingeschränkten Umgebung bestanden 42; drei Prüfungen konnten ihre isolierten NTFS-Junctions wegen verweigerter Berechtigungen nicht anlegen. Diese Tests bleiben für normale Windows-/CI-Läufe verpflichtend.
+- 83 Oberfläche-Prüfungen mit künstlichen Daten bestanden: neue Werkzeugtabs, Profilnamen/-anwendung, Mikrofonentwurf/-gerätewahl, manuelle Updateprüfung, Downloadabbruch, neuer Versionsordner, Lesezeichenclips und Auswahl eines Zeittreffers auf späteren Archivseiten. Die Vorschauen enthalten ausschließlich Beispieldaten.
+- 25 reale Controllerprüfungen bestanden: Systemtonaufnahme, Live-Lesezeichen mit gültigem Videoversatz, Schutz der ganzen Datei, Pause/Fortsetzen, unveränderte Pausenzeit, Notizen, MP4-/Clip-Export, Suche anhand lokaler Uhrzeit, Umbenennen eines Lesezeichens und Löschen eigener Begleitdateien. Einstellungen und Windows-Autostart wurden nicht verändert.
+- Sechs zusätzliche FFmpeg-Prüfungen mit künstlichen Audiosignalen bestanden: Mono-Mikrofon wird in 48-kHz-Stereo gewandelt, stilles Mikrofon senkt den Spielton nicht, Null-Lautstärke erzeugt Stille und der Limiter hält laute gemischte Signale innerhalb der Grenzen. Dabei wurde kein tatsächliches Mikrofon geöffnet.
+- Stoppen wartet weder auf einen blockierten Archivscan noch auf eine langsame Spielerkennungs-Abfrage. Veraltete Abfragen können manuelles Stoppen nicht rückgängig machen. Eine manuelle Pause bleibt beim laufenden Spiel bestehen; Spielende beendet ausschließlich die von der Automatik verwaltete Sitzung nach der Wartezeit.
+- Updateprüfung/-vorbereitung wurden mit simulierten GitHub-Antworten und ZIP-Dateien geprüft: HTTPS-/Repositorygrenzen, Prüfsummen, Größen, Abbruch, Pfadgrenzen, Links und veränderte Programmdateien. Der Neustarthelper wurde mit echtem Windows PowerShell geparst, jedoch nicht ausgeführt. Keine fremde Installation oder Autostart-Einstellung wurde ersetzt.
+- Die portable Windows-x64-Anwendung wurde lokal gebaut. Während der Offline-Wiederherstellung konnten aktuelle NuGet-Sicherheitsmeldungen wegen gesperrtem Netzwerk nicht abgerufen werden. Es gibt keine neuen NuGet-Abhängigkeiten.
+
+Mikrofon-Hardware, physisches Abziehen von Geräten, alle konkreten Spiele sowie der Wechsel zu einer echten zukünftigen Updateversion wurden nicht als Hardware-/Installationstest ausgeführt. Ein neuer isolierter Spiele-/GPU-Benchmark und eine volle Woche Dauerbetrieb wurden nicht gemessen. Die bisherige sparsame Hardware-Aufnahme bleibt bestehen; eine lastfreie Aufnahme wird nicht zugesichert. Reale Testvideos bleiben im privaten Arbeitsordner und werden nicht mitgeliefert.
+
 ## Version 1.3 – 14. Oktober 2026
 
 - 96 automatische Prüfungen ohne Aufnahme bestanden: 32 Speicher-/Einstellungstests, 25 Zustands-/Planungs-/Timerprüfungen, 32 Prozess-/Medienprüfungen und 7 Controller-Ablaufprüfungen.
