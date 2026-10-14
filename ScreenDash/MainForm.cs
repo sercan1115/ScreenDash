@@ -44,7 +44,7 @@ public sealed partial class MainForm : Form
     private readonly ProgressBar _exportProgress = new() { Dock = DockStyle.Fill, Style = ProgressBarStyle.Marquee, MarqueeAnimationSpeed = 35, Visible = false };
     private readonly TextBox _search = Entry(), _directory = Entry();
     private readonly ComboBox _archiveFilter = Choice(), _dateFilter = Choice(), _display = Choice(), _audio = Choice(), _profile = Choice(), _encoderChoice = Choice();
-    private readonly CheckBox _audioEnabled = Check("Systemton aufnehmen"), _cursor = Check("Mauszeiger im Video anzeigen"), _software = Check("CPU-Kodierung als Ausweichlösung erlauben"), _pauseOnLock = Check("Bei gesperrtem Windows pausieren"), _recordOnLaunch = Check("Beim Programmstart direkt aufnehmen"), _startWithWindows = Check("ScreenDash mit Windows starten"), _notifications = Check("Hinweise im Windows-Infobereich anzeigen"), _minimizeOnRecord = Check("Nach dem Aufnahmestart in den Infobereich minimieren");
+    private readonly CheckBox _audioEnabled = Check("Systemton aufnehmen"), _cursor = Check("Mauszeiger im Video anzeigen"), _software = Check("CPU-Kodierung als Ausweichlösung erlauben"), _pauseOnLock = Check("Bei gesperrtem Windows pausieren"), _recordOnLaunch = Check("Beim Programmstart direkt aufnehmen"), _startWithWindows = Check("ScreenDash mit Windows starten"), _notifications = Check("Hinweise im Windows-Infobereich anzeigen"), _minimizeOnRecord = Check("Nach dem Aufnahmestart in die Taskleiste minimieren");
     private readonly NumericUpDown _segment = Number(1, 60), _retention = Number(1, 365), _maxStorage = Number(1, 4096), _minFree = Number(1, 128), _protectMinutes = Number(1, 180), _customFps = Number(5, 60), _customBitrate = Number(500, 50000), _autoStopMinutes = Number(1, 1440);
     private readonly Panel _settingsFields = new() { Dock = DockStyle.Fill, Margin = Padding.Empty };
     private bool _uiBusy, _stopping, _exitRequested, _exitInProgress, _allowClose, _hiddenNoticeShown, _hotkeyToggle, _hotkeyProtect, _hotkeyPause, _loadingSettings, _updatingProfile, _exporting, _refreshingArchive, _wasRecording, _settingsDirty, _archiveLoading, _archiveReloadPending;
@@ -57,7 +57,7 @@ public sealed partial class MainForm : Form
     public MainForm(IAppController controller, bool startMinimized = false, bool enableHotkeys = true)
     {
         _controller = controller; _startMinimized = startMinimized; _enableHotkeys = enableHotkeys;
-        Text = "ScreenDash 1.4.1 · Bildschirm-Dashcam"; StartPosition = FormStartPosition.CenterScreen;
+        Text = "ScreenDash 1.4.2 · Bildschirm-Dashcam"; StartPosition = FormStartPosition.CenterScreen; ShowInTaskbar = true;
         ClientSize = new Size(1180, 780); MinimumSize = new Size(980, 660); AutoScaleMode = AutoScaleMode.Dpi;
         BackColor = Canvas; ForeColor = Ink; Font = new Font("Segoe UI", 10); DoubleBuffered = true;
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application; } catch { Icon = SystemIcons.Application; }
@@ -68,14 +68,19 @@ public sealed partial class MainForm : Form
         _trayBookmark = new ToolStripMenuItem("Moment markieren", null, async (_, _) => await AddBookmarkAsync()) { ShortcutKeyDisplayString = "Strg + Alt + F11" };
         _trayMenu.Items.AddRange([_trayToggle, _trayPause, _trayProtect, _trayBookmark, new ToolStripSeparator()]);
         _trayMenu.Items.Add("Aufnahmeordner öffnen", null, (_, _) => RunSync(_controller.OpenRecordingFolder));
+        _trayMenu.Items.Add("Desktop-Verknüpfung erstellen", null, (_, _) => RunSync(() =>
+        {
+            WindowsIntegration.EnsureDesktopShortcut(Application.ExecutablePath);
+            _footer.Text = "Desktop-Verknüpfung ist bereit.";
+            Notify("Desktop-Verknüpfung ist bereit.");
+        }));
         _trayMenu.Items.Add("Beenden", null, async (_, _) => await ExitAsync());
         _tray = new NotifyIcon { Text = "ScreenDash · bereit", Icon = Icon, Visible = true, ContextMenuStrip = _trayMenu }; _tray.DoubleClick += (_, _) => ShowWindow();
         BuildShell(); BuildDashboard(); BuildSettings(); BuildRecordings(); BuildTools(); TrackSettingsChanges();
         _content.Controls.AddRange([_dashboard, _settingsPage, _recordingsPage, _toolsPage]); ShowPage(0); LoadSettings(); RefreshDashboard();
         InitializeMotion();
         _controller.Changed += ControllerChanged; _controller.Notice += ControllerNotice; FormClosing += HandleFormClosing;
-        Resize += (_, _) => { if (WindowState == FormWindowState.Minimized) Hide(); };
-        Shown += (_, _) => { FitWorkingArea(); if (_startMinimized) BeginInvoke((Action)Hide); };
+        Shown += (_, _) => { FitWorkingArea(); if (_startMinimized) BeginInvoke((Action)MinimizeToTaskbar); };
     }
 
     private void BuildSettings()
@@ -94,7 +99,7 @@ public sealed partial class MainForm : Form
         var directoryRow = Grid(2, 1); directoryRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); directoryRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100)); _directory.Margin = new Padding(0, 2, 7, 2); directoryRow.Controls.Add(_directory, 0, 0); var browse = ActionButton("Wählen …"); browse.Dock = DockStyle.Fill; browse.Margin = Padding.Empty;
         browse.Click += (_, _) => { using var dialog = new FolderBrowserDialog { Description = "Aufnahmeordner für ScreenDash wählen", UseDescriptionForTitle = true, SelectedPath = _directory.Text }; if (dialog.ShowDialog(this) == DialogResult.OK) _directory.Text = dialog.SelectedPath; }; directoryRow.Controls.Add(browse, 1, 0);
         AddField(storageFields, "Aufnahmeordner", directoryRow); AddOption(storageFields, _singleFile, 39); _singleFile.CheckedChanged += (_, _) => _segment.Enabled = !_singleFile.Checked; AddField(storageFields, "Abschnittslänge", WithUnit(_segment, "Minuten · einzeln abspielbare Videodateien")); AddField(storageFields, "Automatisch löschen nach", WithUnit(_retention, "Tagen · nur ungesicherte Abschnitte")); AddField(storageFields, "Speicherlimit", WithUnit(_maxStorage, "GB · älteste ungesicherte Abschnitte zuerst")); AddField(storageFields, "Freie Reserve", WithUnit(_minFree, "GB · bei Platzmangel stoppt die Aufnahme")); AddField(storageFields, "Rückblick sichern", WithUnit(_protectMinutes, "Minuten · für Schaltfläche und Tastenkürzel")); AddWide(storageFields, _quotaEstimate, 48); _retention.ValueChanged += (_, _) => UpdateEstimates(); _maxStorage.ValueChanged += (_, _) => UpdateEstimates();
-        var automationFields = SettingsGrid(_settingTabs[3]); AddHeading(automationFields, "Läuft, wenn du es brauchst.", "ScreenDash arbeitet im Hintergrund und bleibt über den Infobereich erreichbar."); AddOption(automationFields, _startWithWindows, 39); AddOption(automationFields, _recordOnLaunch, 39); AddOption(automationFields, _pauseOnLock, 39); AddOption(automationFields, _minimizeOnRecord, 39); AddOption(automationFields, _notifications, 39); AddOption(automationFields, _autoStopEnabled, 39); AddField(automationFields, "Auto-Stopp nach", WithUnit(_autoStopMinutes, "Minuten Aufnahmezeit · Pausen zählen nicht")); _autoStopEnabled.CheckedChanged += (_, _) => _autoStopMinutes.Enabled = _autoStopEnabled.Checked; _tips.SetToolTip(_autoStopEnabled, "Stoppt die gesamte Sitzung nach der eingestellten Aufnahmezeit. Standardmäßig aus."); AddHelp(automationFields, "Tastenkürzel funktionieren auch bei minimiertem Fenster.\nStrg + Alt + F8   Start / Stopp    ·    F9   Sichern    ·    F10   Pause / Fortsetzen");
+        var automationFields = SettingsGrid(_settingTabs[3]); AddHeading(automationFields, "Läuft, wenn du es brauchst.", "ScreenDash arbeitet im Hintergrund und bleibt in der Taskleiste erreichbar."); AddOption(automationFields, _startWithWindows, 39); AddOption(automationFields, _recordOnLaunch, 39); AddOption(automationFields, _pauseOnLock, 39); AddOption(automationFields, _minimizeOnRecord, 39); AddOption(automationFields, _notifications, 39); AddOption(automationFields, _autoStopEnabled, 39); AddField(automationFields, "Auto-Stopp nach", WithUnit(_autoStopMinutes, "Minuten Aufnahmezeit · Pausen zählen nicht")); _autoStopEnabled.CheckedChanged += (_, _) => _autoStopMinutes.Enabled = _autoStopEnabled.Checked; _tips.SetToolTip(_autoStopEnabled, "Stoppt die gesamte Sitzung nach der eingestellten Aufnahmezeit. Standardmäßig aus."); AddHelp(automationFields, "Tastenkürzel funktionieren auch bei minimiertem Fenster.\nStrg + Alt + F8   Start / Stopp    ·    F9   Sichern    ·    F10   Pause / Fortsetzen");
         var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Padding = new Padding(0, 14, 0, 0), Margin = Padding.Empty }; _save.Size = new Size(242, 42); _discard.Size = new Size(130, 42); _save.Click += async (_, _) => await SaveSettingsAsync(); _discard.Click += (_, _) => { LoadSettings(); RefreshDashboard(); _footer.Text = "Änderungen verworfen."; }; actions.Controls.AddRange([_save, _discard]); page.Controls.Add(actions, 0, 3); _settingsPage.Controls.Add(page); ShowSettingTab(0);
         _tips.SetToolTip(_save, "Geänderte Einstellungen übernehmen · Strg + S");
     }
@@ -195,8 +200,8 @@ public sealed partial class MainForm : Form
         _trayToggle.Text = _stopping ? "Aufnahme wird gestoppt …" : armed ? "Aufnahme stoppen" : "Aufnahme starten"; _trayToggle.Enabled = _toggle.Enabled; _trayPause.Text = paused ? "Aufnahme fortsetzen" : "Aufnahme pausieren"; _trayPause.Enabled = _pause.Enabled; _trayProtect.Text = s.SingleFile ? "Aufnahme sichern" : $"Letzte {s.ProtectMinutes} Min. sichern"; _trayProtect.Enabled = !busy; _tray.Text = status.Recording ? "ScreenDash · Aufnahme läuft" : paused ? "ScreenDash · pausiert" : "ScreenDash · " + (busy ? "arbeitet" : "bereit");
         _settingsFields.Enabled = !armed && !busy; _save.Enabled = !armed && !busy && _settingsDirty; _discard.Enabled = !busy && _settingsDirty; _settingsHint.Text = armed ? "Sitzung aktiv. Stoppe die Aufnahme, um diese Einstellungen zu ändern." : _settingsDirty ? "● Ungespeicherte Änderungen · Strg + S zum Speichern" : "Einstellungen sind gespeichert."; _settingsHint.ForeColor = armed || _settingsDirty ? Amber : Muted;
         if (status.Storage is { } storage) { _storage.Text = $"{FormatBytes(storage.TotalBytes)} von {s.MaxStorageGb} GB belegt"; _storageDetail.Text = $"{FormatBytes(storage.FreeBytes)} frei auf dem Laufwerk   ·   {FormatBytes(storage.ProtectedBytes)} gesichert   ·   {s.MinFreeSpaceGb} GB Reserve"; _storageMeter.Fraction = Math.Clamp(storage.TotalBytes / (s.MaxStorageGb * 1024d * 1024d * 1024d), 0, 1); _storageMeter.ProtectedFraction = Math.Clamp(storage.ProtectedBytes / (s.MaxStorageGb * 1024d * 1024d * 1024d), 0, 1); _storageMeter.Warning = !storage.CanRecord; var estimate = RecordingEstimates.Calculate(s, storage.ProtectedBytes, storage.FreeBytes); _storageEstimate.Text = !storage.CanRecord ? storage.Message : $"Ungesicherte Aufnahmen: max. {s.RetentionDays} Tage   ·   Bei Daueraufnahme ungefähr {FormatHours(estimate.EffectiveRetentionHours)} im Rückblick"; _storageEstimate.ForeColor = storage.CanRecord ? Cyan : Amber; }
-        if (status.Recording && !_wasRecording && s.MinimizeOnRecord && Visible) BeginInvoke((Action)Hide); _wasRecording = status.Recording;
-        if (Visible && _page == 2 && !_archiveLoading && Stopwatch.GetElapsedTime(_lastRecordingsRefresh).TotalSeconds >= 10 && !_uiBusy) RefreshRecordings(); UpdateRecordingActions(); RefreshFeatureActions();
+        if (status.Recording && !_wasRecording && s.MinimizeOnRecord && Visible) BeginInvoke((Action)MinimizeToTaskbar); _wasRecording = status.Recording;
+        if (Visible && WindowState != FormWindowState.Minimized && _page == 2 && !_archiveLoading && Stopwatch.GetElapsedTime(_lastRecordingsRefresh).TotalSeconds >= 10 && !_uiBusy) RefreshRecordings(); UpdateRecordingActions(); RefreshFeatureActions();
     }
 
     private void RefreshRecordings(bool reload = true)
@@ -439,7 +444,7 @@ public sealed partial class MainForm : Form
     }
     private async Task RunActionAsync(Func<Task> action) { if (_uiBusy || _stopping || _exitInProgress) return; _uiBusy = true; RefreshDashboard(); try { await action(); } catch (OperationCanceledException) { } catch (Exception ex) { ShowError(ex); } finally { _uiBusy = false; if (!IsDisposed) { RefreshDashboard(); if (_page == 2) RefreshRecordings(); } } }
     private void RunSync(Action action) { try { action(); } catch (Exception ex) { ShowError(ex); } }
-    private void ShowError(Exception error) { string message = error.Message.Split(" Details:", StringSplitOptions.None)[0]; if (message.Length > 600) message = message[..600] + " … Weitere Informationen in der Diagnose."; _footer.Text = message; if (Visible) MessageBox.Show(this, message, "ScreenDash · Aktion nicht möglich", MessageBoxButtons.OK, MessageBoxIcon.Warning); else Notify(message, ToolTipIcon.Warning); }
+    private void ShowError(Exception error) { string message = error.Message.Split(" Details:", StringSplitOptions.None)[0]; if (message.Length > 600) message = message[..600] + " … Weitere Informationen in der Diagnose."; _footer.Text = message; if (Visible && WindowState != FormWindowState.Minimized) MessageBox.Show(this, message, "ScreenDash · Aktion nicht möglich", MessageBoxButtons.OK, MessageBoxIcon.Warning); else Notify(message, ToolTipIcon.Warning); }
     private void FitWorkingArea()
     {
         var area = Screen.FromControl(this).WorkingArea;
@@ -448,11 +453,12 @@ public sealed partial class MainForm : Form
         // Offscreen preview harnesses deliberately use negative coordinates.
         if (Left > -10000 && Top > -10000) Location = new Point(Math.Clamp(Left, area.Left, Math.Max(area.Left, area.Right - Width)), Math.Clamp(Top, area.Top, Math.Max(area.Top, area.Bottom - Height)));
     }
-    private void ShowWindow() { Show(); WindowState = FormWindowState.Normal; Activate(); RefreshDashboard(); if (_page == 2) RefreshRecordings(); }
+    private void MinimizeToTaskbar() { if (IsDisposed || Disposing) return; ShowInTaskbar = true; WindowState = FormWindowState.Minimized; }
+    private void ShowWindow() { ShowInTaskbar = true; Show(); WindowState = FormWindowState.Normal; Activate(); RefreshDashboard(); if (_page == 2) RefreshRecordings(); }
     private async void HandleFormClosing(object? sender, FormClosingEventArgs e)
     {
         if (_allowClose) return; bool windowsClosing = e.CloseReason is CloseReason.WindowsShutDown or CloseReason.TaskManagerClosing;
-        if (!_exitRequested && !windowsClosing && (_controller.Status.Armed || _controller.Status.Recording || _controller.Status.Paused || _controller.Status.Busy || _uiBusy || _exporting)) { e.Cancel = true; Hide(); if (!_hiddenNoticeShown) { _hiddenNoticeShown = true; Notify("Die Aufnahme bleibt aktiv. ScreenDash über das Symbol im Infobereich öffnen oder dort beenden."); } return; }
+        if (!_exitRequested && !windowsClosing && (_controller.Status.Armed || _controller.Status.Recording || _controller.Status.Paused || _controller.Status.Busy || _uiBusy || _exporting)) { e.Cancel = true; MinimizeToTaskbar(); if (!_hiddenNoticeShown) { _hiddenNoticeShown = true; Notify("ScreenDash läuft weiter und bleibt in der Taskleiste erreichbar. Zum Beenden das Menü im Infobereich verwenden."); } return; }
         e.Cancel = true; await ExitAsync();
     }
     private async Task ExitAsync() { if (_exitInProgress || _allowClose) return; _exitRequested = true; _exitInProgress = true; RefreshDashboard(); try { _updateCancellation?.Cancel(); if (_activeUpdateTask is { } updateTask) { try { await updateTask; } catch { } } _exportCancellation?.Cancel(); if (_activeExportTask is { } export) { try { await export; } catch (OperationCanceledException) { } catch { } } await _controller.StopAsync(); _allowClose = true; _tray.Visible = false; Close(); } catch (Exception ex) { _exitRequested = false; _exitInProgress = false; ShowWindow(); ShowError(ex); } }

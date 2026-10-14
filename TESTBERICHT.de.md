@@ -1,5 +1,14 @@
 # ScreenDash – Prüfergebnis
 
+## Version 1.4.2 – 14. Oktober 2026
+
+- 117 Oberfläche-/Animationsprüfungen mit künstlichen Daten: zusätzlich normaler Start, sichtbarer Taskleisteneintrag beim Minimieren, minimierter Start, Wiederherstellen, Weiteraufnahme beim Schließen sowie sofortiges Beenden aller Bewegungen beim Minimieren. Keine Bildschirm- oder Tonaufnahme in diesen Prüfungen.
+- 20 native Windows-Verknüpfungsprüfungen in isolierten temporären Ordnern: Ziel, Symbol, Arbeitsordner, normale Fensterdarstellung, leere Startargumente und persistierte AppUserModelID; Aktualisieren eigener Verknüpfungen, unveränderte Dateien ohne erneutes Schreiben, Unicode-Pfade, Schutz fremder/beschädigter/gesperrter/schreibgeschützter Dateien und Reparse Points sowie Aufräumen nach Fehlern. Eine unabhängige Auslesung der UTF-16-LinkInfo-Felder prüft den japanischen Testpfad; der WScript-Shell-Leser dieser Windows-Umgebung gibt dafür einen ANSI-Ersatz zurück. Kein Test startet die Dummy-EXE oder schreibt auf den echten Desktop.
+- 5 PowerShell-Signierprüfungen: Syntax und harter Abbruch bei ungültigem Fingerabdruck, fehlender Identität, HTTP-Zeitstempel und Zugangsdaten in der Zeitstempel-URL. Die isolierte Dummy-Datei bleibt in allen Fällen unverändert. Keine Zertifikate oder Windows-Schutzfunktionen wurden verändert.
+- Zusammen mit den bestehenden 177 Funktionsprüfungen umfasst Build/CI **319 Prüfungen ohne reale Aufnahme**. Neue Fenster- und Shell-Funktionen benötigen keine zusätzliche NuGet-Abhängigkeit und keinen laufenden Hintergrundtimer.
+
+Die EXE ist weiterhin **nicht digital signiert**: in dieser Umgebung ist keine verwendbare Codesignaturidentität vorhanden. Der echte Signier-/Zeitstempel-Erfolgsweg konnte deshalb nicht ausgeführt werden; SmartScreen-Warnungen können weiterhin erscheinen. Die automatische Wiederherstellung einer anderen bereits laufenden Prozessinstanz wurde nicht durch eine zweite reale Recorder-Instanz getestet. Es gibt keinen neuen Spiele-/GPU-Benchmark und keinen physischen Monitor-Skalierungstest. Aufnahmeformat, Encoder und Audio wurden in dieser Version nicht geändert.
+
 ## Version 1.4.1 – 14. Oktober 2026
 
 - 102 Oberfläche-/Animationsprüfungen mit künstlichen Daten bestanden: bisherige Aufnahme-, Archiv-, Profil-, Audio- und Updatebedienung sowie begrenzte Hover-/Seitenübergänge, keine Animationstimer im Leerlauf, sofortiges Beenden beim Verstecken, abgeschaltete Bewegung, schnelle Navigation und vollständig sichtbare Aufnahmebuttons im kompakten Dashboard.

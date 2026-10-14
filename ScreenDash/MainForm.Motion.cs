@@ -20,6 +20,7 @@ public sealed partial class MainForm
             if (t >= 1) CompletePageTransition();
         };
         VisibleChanged += MotionVisibilityChanged;
+        Resize += MotionVisibilityChanged;
     }
     private void SetMotionEnabled(bool enabled) { _motionEnabled = enabled; if (!enabled) { CompletePageTransition(); FinishButtonMotion(this); } }
     private void BeginPageTransition()
@@ -44,5 +45,5 @@ public sealed partial class MainForm
     {
         foreach (Control child in parent.Controls) { if (child is ThemeButton button) button.FinishAnimation(); if (child.HasChildren) FinishButtonMotion(child); }
     }
-    private void DisposeMotion() { if (_motionDisposed) return; VisibleChanged -= MotionVisibilityChanged; CompletePageTransition(); _pageMotionTimer.Dispose(); _motionDisposed = true; }
+    private void DisposeMotion() { if (_motionDisposed) return; VisibleChanged -= MotionVisibilityChanged; Resize -= MotionVisibilityChanged; CompletePageTransition(); _pageMotionTimer.Dispose(); _motionDisposed = true; }
 }

@@ -1,6 +1,6 @@
-# ScreenDash 1.4.1
+# ScreenDash 1.4.2
 
-Die Neuerungen und Hinweise zum Update stehen in `NEU-IN-1.4.1.de.md`.
+Die Neuerungen und Hinweise zum Update stehen in `NEU-IN-1.4.2.de.md`.
 
 Eine lokale Bildschirm-Dashcam für Windows 10/11 (64 Bit). Sie nimmt **einen ausgewählten Monitor und den Ton eines Windows-Wiedergabegeräts** auf. Alle Videos bleiben auf deinem PC.
 
@@ -8,10 +8,14 @@ Eine lokale Bildschirm-Dashcam für Windows 10/11 (64 Bit). Sie nimmt **einen au
 
 1. Falls du die ZIP-Datei verwendest: vollständig entpacken.
    Bei einem Update zuerst die alte App über das Tray-Menü **Beenden** schließen. Vorhandene Aufnahmen und Einstellungen bleiben erhalten.
-2. `ScreenDash.exe` doppelt anklicken. Ein .NET-Download ist nicht nötig.
+2. `ScreenDash.exe` doppelt anklicken. Das Fenster erscheint und eine eigene Desktop-Verknüpfung wird angelegt. Ein .NET-Download ist nicht nötig.
 3. Unter **Einstellungen** Bildschirm, Tonausgabe und Aufnahmeordner wählen. **Einstellungen speichern**, dann **Aufnahme starten**.
 
 FFmpeg muss separat installiert sein. Die App sucht `ffmpeg.exe` neben der EXE, unter `tools/ffmpeg.exe` und im Windows-PATH. Installiere eine aktuelle Windows-Ausgabe mit `ddagrab` und Hardware-Encodern, etwa über `winget install --id Gyan.FFmpeg -e`. Anschließend ScreenDash neu öffnen; bei Bedarf `ffmpeg.exe` neben die App legen. FFmpeg ist nicht in diesem Paket enthalten.
+
+Die veröffentlichte EXE ist derzeit **nicht digital signiert**. Windows-SmartScreen kann deshalb „Der Computer wurde durch Windows geschützt“ beziehungsweise einen unbekannten Herausgeber anzeigen. Eine echte Codesignatur benötigt eine geprüfte Herausgeberidentität; der Build-Weg ist in [SIGNIERUNG.de.md](SIGNIERUNG.de.md) vorbereitet. Auch neue signierte Dateien können zunächst warnen. [Microsoft: SmartScreen-Reputation](https://learn.microsoft.com/de-de/windows/apps/package-and-deploy/smartscreen-reputation)
+
+Minimieren behält das Programm in der Taskleiste. Ein erneuter Doppelklick öffnet das laufende Fenster. Das eigene Desktop-Symbol wird nach einem Update auf die neue EXE angepasst und lässt sich im Menü neben der Windows-Uhr über **Desktop-Verknüpfung erstellen** wiederherstellen. Eine fremde oder beschädigte gleichnamige Verknüpfung wird nicht ersetzt; falls der Desktop nicht beschreibbar ist, bleibt die App über Taskleiste und Infobereich bedienbar. Die Startverknüpfung enthält keine Aufnahmeautomatik; dafür gelten deine gespeicherten Einstellungen.
 
 ## Enthaltene Funktionen
 
@@ -21,7 +25,7 @@ FFmpeg muss separat installiert sein. Die App sucht `ffmpeg.exe` neben der EXE, 
 - **Eigene Aufnahmeprofile:** unter **Werkzeuge → Aufnahmeprofile** Bildschirm, Audio, Mikrofon, Encoder und Qualität speichern. Anwenden setzt die Aufnahme-Einstellungen bei gestoppter Aufnahme; Speicherregeln, Autostart und Spielerkennung bleiben erhalten.
 - **Tonwarnungen:** bei längerer Stille erscheint ein Hinweis auf das Wiedergabegerät. Wartezeit 10–600 Sekunden, standardmäßig 30. Stille ist kein Nachweis eines Fehlers; bei Bedarf ausschalten. Gerätefehler werden gesondert angezeigt.
 - **Optionales Mikrofon:** ausdrücklich in den Audio-Einstellungen einschalten. Spielton und Mikrofon lassen sich einzeln auf 0–200 % stellen und werden in einer gemeinsamen AAC-Tonspur gespeichert. Mikrofon allein ist ebenfalls möglich. Windows muss Mikrofonzugriff für Desktop-Apps erlauben; ein Limiter begrenzt Übersteuerung.
-- **Updates:** unter **Werkzeuge → Updates** manuell bei GitHub prüfen, herunterladen, abbrechen und nach Prüfsummenprüfung zur neuen Version wechseln. Eine laufende Aufnahme wird zuvor geschlossen, ein Export abgebrochen. Die neue portable EXE startet aus einem eigenen Ordner unter `%LOCALAPPDATA%\ScreenDash\updates`; Einstellungen und Videos bleiben erhalten. Aktivierter Windows-Autostart wird angepasst. Alte manuelle Verknüpfungen zeigen weiter auf die alte EXE. Die App prüft nicht automatisch im Hintergrund auf Updates.
+- **Updates:** unter **Werkzeuge → Updates** manuell bei GitHub prüfen, herunterladen, abbrechen und nach Prüfsummenprüfung zur neuen Version wechseln. Eine laufende Aufnahme wird zuvor geschlossen, ein Export abgebrochen. Die neue portable EXE startet aus einem eigenen Ordner unter `%LOCALAPPDATA%\ScreenDash\updates`; Einstellungen und Videos bleiben erhalten. Aktivierter Windows-Autostart und die eigene Desktop-Verknüpfung werden angepasst. Andere manuelle Verknüpfungen zeigen weiter auf die alte EXE. Die App prüft nicht automatisch im Hintergrund auf Updates.
 - **Datum und Uhrzeit:** unter **Aufnahmen → Zeitpunkt** einen Moment eingeben, die passende Datei finden und einen Clip vorbereiten. Es zählen lokale Uhrzeit und der gespeicherte Aufnahmebeginn; Zeitsprünge oder manuell veränderte Dateizeiten können die Zuordnung verschieben. Für Medienmetadaten ist FFprobe erforderlich.
 
 - **Clip-Werkzeug:** abgeschlossene Aufnahmen als Ausschnitt kopieren; Start und Länge wählen oder die letzten 30 Sekunden, eine Minute oder fünf Minuten verwenden. Bild und Ton werden ohne Neukodierung exportiert. Schlüsselbilder können den Schnitt etwas verschieben. FFprobe aus dem vollständigen FFmpeg-Paket ist dafür erforderlich.
@@ -35,7 +39,7 @@ FFmpeg muss separat installiert sein. Die App sucht `ffmpeg.exe` neben der EXE, 
 - **Aufnahmeliste:** Dateien abspielen, schützen/freigeben und abgeschlossene Segmente ohne Neukodierung als MP4 exportieren. Exporte liegen außerhalb des Ringpuffers und werden nicht automatisch gelöscht. Die originale MKV bleibt erhalten. Ein Export kann abgebrochen werden; Aufnahme starten, stoppen und pausieren bleibt währenddessen verfügbar.
 - **Archivverwaltung:** nach Bezeichnung, Dateiname, Zeitraum und Schutzstatus filtern; mehrere Dateien gemeinsam sichern/freigeben oder nach Bestätigung löschen. Die laufende Datei kann nicht gelöscht werden. Aktualisieren lädt die Liste im Hintergrund; unveränderte Zeilen, Auswahl und Scrollposition bleiben erhalten. Spaltenüberschriften sortieren nach Zeitpunkt, tatsächlicher Größe oder Bezeichnung. Eigene Bezeichnungen liegen in einer zugehörigen `.note.json`-Datei.
 - **Manuelle Pause:** pausieren und bewusst fortsetzen. Eine manuelle Pause bleibt auch nach dem Entsperren des PCs erhalten. Fortsetzen erzeugt einen neuen Abschnitt.
-- **Tray und Tastenkürzel:** im Hintergrund bedienen, ohne ein großes Fenster offen zu lassen. Schließen während einer Aufnahme minimiert in den Tray. Über **Beenden** im Tray wird die Aufnahme beendet und die App geschlossen.
+- **Taskleiste, Infobereich und Tastenkürzel:** bei minimiertem Fenster im Hintergrund bedienen. Schließen während einer Aufnahme oder eines Exports minimiert in die Taskleiste. Über **Beenden** im Infobereich wird die Aufnahme beendet und die App geschlossen. Animationen und die automatische Aktualisierung der Aufnahmeliste pausieren beim Minimieren.
 - **PC-Sperre und Standby:** beim Sperren standardmäßig pausieren; nach dem Entsperren fortsetzen. Standby unterbricht die Aufnahme ebenfalls. In dieser Zeit gibt es keine Aufnahme.
 - **Optionale Automatik:** Windows-Autostart und Aufnahme beim Programmstart getrennt einschalten. Beide sind anfangs ausgeschaltet.
 - **Unterbrechungen:** bei einem unerwarteten Aufnahmefehler bis zu drei automatische Neustartversuche. Fehler sind im lokalen Protokoll nachvollziehbar.

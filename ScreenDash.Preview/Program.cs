@@ -22,7 +22,7 @@ internal static class Program
         using var controller = new PreviewController();
         using var form = new MainForm(controller, enableHotkeys: false);
         form.Icon = previewIcon;
-        form.Text = "ScreenDash 1.4.1 · Vorschau mit Beispieldaten";
+        form.Text = "ScreenDash 1.4.2 · Vorschau mit Beispieldaten";
         form.StartPosition = FormStartPosition.Manual;
         form.Location = new Point(-20000, -20000);
         form.ClientSize = new Size(1180, 780);
@@ -201,6 +201,7 @@ internal static class Program
             return typeof(MainForm).GetMethod(name, flags)!.Invoke(form, args);
         }
         void Check(bool result, string description) { if (!result) throw new InvalidOperationException("UI check failed: " + description); checks++; }
+        Check(form.Visible && form.ShowInTaskbar && form.WindowState == FormWindowState.Normal, "normal launch shows the window and its taskbar entry");
         controller.Recording = false; Call("ShowPage", 2);
         var grid = Field<DataGridView>("_recordings");
         grid.ClearSelection(); grid.Rows[0].Selected = true; grid.Rows[1].Selected = true;
@@ -436,6 +437,45 @@ internal static class Program
         Check(!HoverRunning(), "hiding the window also stops button hover timers");
         form.Show(); Call("SetMotionEnabled", false); HoverEvent("OnMouseEnter");
         Check(!HoverRunning(), "motion disabled also prevents animated button hovers");
+        HoverEvent("OnMouseLeave"); Call("SetMotionEnabled", true); Call("CompletePageTransition");
+        Point restoredLocation = form.Location;
+        Size restoredClientSize = form.ClientSize;
+        int stopRequests = controller.StopRequests;
+        controller.Recording = true; Call("RefreshDashboard");
+        HoverEvent("OnMouseEnter"); Call("BeginPageTransition");
+        Check(pageTimer.Enabled == systemMotion && HoverRunning() == systemMotion, "visible recording window can start finite page and hover transitions");
+        form.WindowState = FormWindowState.Minimized; Application.DoEvents();
+        Check(form.Visible && form.ShowInTaskbar && form.WindowState == FormWindowState.Minimized, "minimizing retains the visible native window and taskbar entry");
+        Check(!pageTimer.Enabled && !HoverRunning() && Field<Panel>("_content").Padding == Padding.Empty, "minimizing immediately finishes page and hover motion without requiring the window to be hidden");
+        frames = MotionFrames(); Call("BeginPageTransition"); HoverEvent("OnMouseLeave"); HoverEvent("OnMouseEnter"); PumpFor(100);
+        Check(!pageTimer.Enabled && !HoverRunning() && MotionFrames() == frames, "minimized taskbar windows never start motion or schedule animation frames");
+        Check(controller.Recording && controller.StopRequests == stopRequests, "minimizing leaves an active recording running");
+        Call("ShowWindow"); Application.DoEvents();
+        Check(form.Visible && form.ShowInTaskbar && form.WindowState == FormWindowState.Normal, "opening the minimized application restores its normal visible taskbar window");
+        Check(form.Location == restoredLocation && form.ClientSize == restoredClientSize && Field<Panel>("_content").Padding == Padding.Empty && !pageTimer.Enabled && !HoverRunning(), "restoring preserves the previous bounds and leaves no temporary animation offset or timer");
+        controller.Settings.ShowNotifications = false;
+        form.Close(); Application.DoEvents();
+        Check(!form.IsDisposed && form.Visible && form.ShowInTaskbar && form.WindowState == FormWindowState.Minimized, "closing an active recording minimizes to the taskbar instead of hiding or disposing the window");
+        Check(controller.Recording && controller.StopRequests == stopRequests, "closing an active recording preserves capture and never requests an implicit stop");
+        Call("ShowWindow"); controller.Recording = false; Call("RefreshDashboard");
+        Check(form.Visible && form.WindowState == FormWindowState.Normal && Field<Panel>("_content").Padding == Padding.Empty, "the taskbar window can be reopened after an active-recording close");
+        controller.Settings.MinimizeOnRecord = true;
+        controller.Recording = true; Call("RefreshDashboard"); Application.DoEvents();
+        Check(form.Visible && form.ShowInTaskbar && form.WindowState == FormWindowState.Minimized && controller.StopRequests == stopRequests, "the optional minimize-on-record action keeps the running capture in the taskbar");
+        Call("ShowWindow"); Call("RefreshDashboard"); Application.DoEvents();
+        Check(form.Visible && form.WindowState == FormWindowState.Normal, "opening an ongoing recording does not immediately minimize it again");
+        controller.Recording = false; controller.Settings.MinimizeOnRecord = false; Call("RefreshDashboard");
+        using (var startupController = new PreviewController())
+        using (var startupForm = new MainForm(startupController, startMinimized: true, enableHotkeys: false))
+        {
+            startupController.Settings.ShowNotifications = false;
+            startupForm.StartPosition = FormStartPosition.Manual; startupForm.Location = new Point(-20000, -20000);
+            startupForm.Show(); Application.DoEvents();
+            Check(startupForm.Visible && startupForm.ShowInTaskbar && startupForm.WindowState == FormWindowState.Minimized, "explicit minimized startup creates a taskbar window instead of a hidden tray-only window");
+            typeof(MainForm).GetMethod("ShowWindow", flags)!.Invoke(startupForm, null); Application.DoEvents();
+            Check(startupForm.Visible && startupForm.ShowInTaskbar && startupForm.WindowState == FormWindowState.Normal && startupController.StartRequests == 0 && startupController.StopRequests == 0, "restoring an explicitly minimized startup leaves capture idle and creates no start or stop requests");
+        }
+        HoverEvent("OnMouseLeave");
         Call("SetMotionEnabled", false);
         Console.WriteLine($"UI checks passed: {checks}");
         SynchronizationContext.SetSynchronizationContext(previousContext);

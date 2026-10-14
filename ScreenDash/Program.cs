@@ -1,5 +1,3 @@
-using System.Diagnostics;
-
 namespace ScreenDash;
 
 internal static class Program
@@ -9,11 +7,19 @@ internal static class Program
     {
         if (args.Length == 2 && args[0] == "--smoke-test")
             return SmokeTest.RunAsync(Path.GetFullPath(args[1])).GetAwaiter().GetResult();
+        if (args.Length == 1 && args[0] == "--create-desktop-shortcut")
+        {
+            try { WindowsIntegration.EnsureDesktopShortcut(Application.ExecutablePath); return 0; }
+            catch (Exception ex) { AppLog.Write(ex); return 1; }
+        }
+        try { WindowsIntegration.SetAppIdentity(); }
+        catch (Exception ex) { AppLog.Write(ex); }
         ApplicationConfiguration.Initialize();
         using var mutex = new Mutex(true, "Local\\ScreenDash_" + Environment.UserName, out bool first);
         if (!first)
         {
-            MessageBox.Show("ScreenDash läuft bereits. Öffne die App über das Symbol neben der Windows-Uhr.", "ScreenDash", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            if (!WindowsIntegration.TryRestoreExistingWindow())
+                MessageBox.Show("ScreenDash läuft bereits. Öffne die App über die Taskleiste oder das Symbol neben der Windows-Uhr.", "ScreenDash", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return 0;
         }
         Application.ThreadException += (_, e) => Report(e.Exception);
@@ -23,6 +29,8 @@ internal static class Program
         {
             using var controller = new AppController();
             using var form = new MainForm(controller, args.Contains("--tray"));
+            try { WindowsIntegration.EnsureDesktopShortcut(Application.ExecutablePath); }
+            catch (Exception ex) { AppLog.Write("Desktop-Verknüpfung konnte nicht erstellt werden: " + ex.Message); }
             form.Shown += async (_, _) =>
             {
                 if (controller.Settings.RecordOnLaunch)

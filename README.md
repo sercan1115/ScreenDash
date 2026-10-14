@@ -2,7 +2,7 @@
 
 Eine lokale Bildschirm-Dashcam für **Windows 10/11 (64 Bit)**. ScreenDash zeichnet einen ausgewählten Monitor mit Systemton auf, speichert eine durchgehende Datei je Aufnahme und räumt alte Aufnahmen automatisch auf.
 
-**[Windows-Version herunterladen](https://github.com/sercan1115/ScreenDash/releases/latest)** · [Anleitung](README.de.md) · [Neuerungen in 1.4.1](NEU-IN-1.4.1.de.md)
+**[Windows-Version herunterladen](https://github.com/sercan1115/ScreenDash/releases/latest)** · [Anleitung](README.de.md) · [Neuerungen in 1.4.2](NEU-IN-1.4.2.de.md)
 
 ![ScreenDash – Aufnahmeübersicht mit Beispieldaten](docs/screenshots/dashboard.png)
 
@@ -10,7 +10,8 @@ Die Bilder zeigen die Oberfläche mit Beispieldaten. Ihre Auslastungsanzeigen si
 
 ## Funktionen
 
-- **Neues Design:** dunkle Indigo-Flächen mit Mint-Akzent, klare Vektorsymbole und Statuschips. Kurze Hover- und Seitenübergänge; Animationstimer ruhen im Leerlauf und beim Verstecken der App.
+- **Fenster und Desktop-Symbol:** sichtbar starten, beim Minimieren in der Taskleiste bleiben und per Doppelklick wieder öffnen. Die eigene Desktop-Verknüpfung wird beim Start angelegt und nach einem Update angepasst.
+- **Neues Design:** dunkle Indigo-Flächen mit Mint-Akzent, klare Vektorsymbole und Statuschips. Kurze Hover- und Seitenübergänge; Animationstimer ruhen im Leerlauf und bei minimiertem Fenster.
 - **Lesezeichen:** während der Aufnahme Momente markieren, die ganze Datei schützen und später Clips davor/danach exportieren.
 - **Spielerkennung:** bei ausgewählten Spielen automatisch starten/stoppen; manuelles Stoppen wird respektiert. Anfangs ausgeschaltet.
 - **Aufnahmeprofile:** eigene Bildschirm-/Audio-/Qualitätseinstellungen speichern, ohne Speicherregeln oder Autostart zu verändern.
@@ -53,6 +54,8 @@ Die Bilder zeigen die Oberfläche mit Beispieldaten. Ihre Auslastungsanzeigen si
 
 Die portable App enthält die .NET-Laufzeit. FFmpeg ist separat erforderlich; ScreenDash findet `ffmpeg.exe` neben der App, unter `tools/ffmpeg.exe` oder im Windows-PATH. Die Clipprüfung benötigt außerdem `ffprobe.exe` aus derselben vollständigen Installation. Die FFmpeg-Ausgabe muss `ddagrab` und einen passenden Hardware-Encoder unterstützen.
 
+Die derzeit veröffentlichte EXE ist **nicht digital signiert**; Windows-SmartScreen kann einen unbekannten Herausgeber melden. Die vorbereitete echte Signierung und ihre Voraussetzungen stehen in [SIGNIERUNG.de.md](SIGNIERUNG.de.md). Auch eine neue signierte Datei kann zunächst warnen. [Microsoft erklärt die Reputation](https://learn.microsoft.com/de-de/windows/apps/package-and-deploy/smartscreen-reputation).
+
 | Tastenkürzel | Aktion |
 | --- | --- |
 | Strg + Alt + F8 | Aufnahme starten / stoppen |
@@ -78,7 +81,7 @@ cd ScreenDash
 .\build.ps1
 ```
 
-Das Skript führt 177 Prüfungen für Speicher, Lesezeichen, Zustände, Medien, Audio, Spielerkennung, Profile und Updates sowie 102 Oberfläche-/Animationsprüfungen mit künstlichen Daten aus und baut die portable App nach `dist`. GitHub Actions führt dieselben Tests auf Windows aus und erzeugt ein Build-Artefakt. Die Windows-Version steht in den Releases.
+Das Skript führt 177 Funktionsprüfungen, 117 Oberfläche-/Animationsprüfungen mit künstlichen Daten, 20 isolierte Windows-Verknüpfungsprüfungen und 5 Signiervalidierungen aus. Es baut die portable App nach `dist`. GitHub Actions führt dieselben 319 Prüfungen auf Windows aus und erzeugt ein Build-Artefakt. Die Windows-Version steht in den Releases.
 
 Zusätzliche Integrationstests benötigen einen interaktiven Windows-Desktop, einen Monitor, FFmpeg und gegebenenfalls ein Audiogerät. Sie zeichnen echte Bildschirminhalte auf und sind daher kein Bestandteil des CI-Laufs. Hinweise und Ergebnisse: [Testbericht](TESTBERICHT.de.md).
 

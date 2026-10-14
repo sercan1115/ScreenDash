@@ -88,11 +88,19 @@ jobs:
           dotnet run --project ScreenDash.Preview/ScreenDash.Preview.csproj --configuration Release -- work/ui-checks --checks-only
           if ($LASTEXITCODE -ne 0) { throw 'Interface and motion checks failed.' }
 
+      - name: Test native shortcuts in isolated temporary folders
+        run: |
+          dotnet run --project ScreenDash.WindowsTests/ScreenDash.WindowsTests.csproj --configuration Release
+          if ($LASTEXITCODE -ne 0) { throw 'Windows shortcut checks failed.' }
+
+      - name: Test signing validation without modifying certificates
+        run: .\scripts\Test-Signing.ps1
+
       - name: Publish portable Windows x64 application
         run: |
           dotnet publish ScreenDash/ScreenDash.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:DebugSymbols=false --output dist
           if ($LASTEXITCODE -ne 0) { throw 'Application publish failed.' }
-          Copy-Item -LiteralPath README.de.md, NEU-IN-1.4.1.de.md, TESTBERICHT.de.md, Drittanbieter-Lizenzen.txt -Destination dist
+          Copy-Item -LiteralPath README.de.md, NEU-IN-1.4.2.de.md, SIGNIERUNG.de.md, TESTBERICHT.de.md, Drittanbieter-Lizenzen.txt -Destination dist
           if (Test-Path -LiteralPath LICENSE) { Copy-Item -LiteralPath LICENSE -Destination dist }
 
       - name: Upload portable application
