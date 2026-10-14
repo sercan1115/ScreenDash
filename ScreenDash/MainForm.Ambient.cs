@@ -9,7 +9,7 @@ public sealed partial class MainForm
 {
     // Only small, childless decorations repaint. The recording controls and video pipeline
     // never participate in this timer, and no image buffers are allocated on a tick.
-    private readonly System.Windows.Forms.Timer _ambientTimer = new() { Interval = 100 };
+    private readonly System.Windows.Forms.Timer _ambientTimer = new() { Interval = 40 };
     private readonly List<AmbientPanel> _ambientSurfaces = [];
     private bool _ambientBackgroundEnabled = true, _ambientInitialized, _ambientDisposed;
     private int _ambientFrameCount, _ambientPaintCount;
@@ -41,7 +41,6 @@ public sealed partial class MainForm
     {
         if (_ambientDisposed) return;
         _ambientBackgroundEnabled = enabled;
-        if (!enabled) SetAmbientPreviewPhase(0);
         RefreshAmbientMotion();
     }
 

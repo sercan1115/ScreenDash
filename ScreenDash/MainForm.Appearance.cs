@@ -102,47 +102,123 @@ public sealed partial class MainForm
     }
     private sealed class ThemeButton : Button
     {
-        private bool _hover, _pressed;
-        private float _hoverAmount, _from, _target;
+        private bool _hover, _pressed, _mouseDown, _keyboardDown, _active;
+        private float _hoverAmount, _pressAmount, _focusAmount, _activeAmount;
+        private float _hoverFrom, _pressFrom, _focusFrom, _activeFrom;
+        private float _hoverTarget, _pressTarget, _focusTarget, _activeTarget;
+        private double _pressDuration = 160;
         private long _started;
         private System.Windows.Forms.Timer? _animation;
         public bool LeftAligned { get; set; }
         public bool AccentBorder { get; set; }
-        public bool Active { get; set; }
+        public bool Active
+        {
+            get => _active;
+            set { if (_active == value) return; _active = value; AnimateInteraction(); }
+        }
         public bool Primary { get; set; }
         public AppGlyph IconKind { get; set; }
         public string? IndexLabel { get; set; }
         public bool AnimationRunning => _animation?.Enabled == true;
         public ThemeButton() => SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
         private bool CanAnimate => Visible && Enabled && FindForm() is { Visible: true, WindowState: not FormWindowState.Minimized } owner && SystemInformation.IsMenuAnimationEnabled && !SystemInformation.HighContrast && (owner is not MainForm main || main._motionEnabled);
-        private void AnimateHover()
+        private bool InteractionVisible => Visible && Enabled && FindForm() is { Visible: true, WindowState: not FormWindowState.Minimized };
+        private void AnimateInteraction()
         {
-            _target = _hover ? 1 : 0;
-            if (!CanAnimate) { _animation?.Stop(); _hoverAmount = _target; Invalidate(); return; }
-            _from = _hoverAmount; _started = Stopwatch.GetTimestamp();
-            if (_animation is null) { _animation = new() { Interval = 32 }; _animation.Tick += (_, _) => AdvanceHover(); }
+            // Rebase from the displayed position, including the time since the last tick.
+            // A quick reversal therefore never jumps back to an old endpoint.
+            if (_animation?.Enabled == true) SampleInteraction(Stopwatch.GetElapsedTime(_started).TotalMilliseconds);
+            _hoverTarget = _hover && Enabled ? 1 : 0;
+            _pressTarget = _pressed && Enabled ? 1 : 0;
+            _focusTarget = Focused && ShowFocusCues && Enabled ? 1 : 0;
+            _activeTarget = Active ? 1 : 0;
+            if (!CanAnimate)
+            {
+                _animation?.Stop();
+                _hoverAmount = _hoverTarget; _pressAmount = _pressTarget; _focusAmount = _focusTarget; _activeAmount = _activeTarget;
+                Invalidate(); return;
+            }
+            _hoverFrom = _hoverAmount; _pressFrom = _pressAmount; _focusFrom = _focusAmount; _activeFrom = _activeAmount;
+            _pressDuration = _pressed ? 90 : 160; _started = Stopwatch.GetTimestamp();
+            if (InteractionSettled()) { _animation?.Stop(); return; }
+            if (_animation is null) { _animation = new() { Interval = 15 }; _animation.Tick += (_, _) => AdvanceInteraction(); }
             _animation.Start(); Invalidate();
         }
-        private void AdvanceHover()
+        private static float EaseInteraction(float from, float target, double elapsedMilliseconds, double duration)
         {
-            if (!CanAnimate) { _animation?.Stop(); _hoverAmount = _hover ? 1 : 0; return; }
-            double t = Math.Clamp(Stopwatch.GetElapsedTime(_started).TotalMilliseconds / 160, 0, 1);
-            _hoverAmount = (float)(_from + (_target - _from) * (1 - Math.Pow(1 - t, 3))); Invalidate();
-            if (t >= 1) _animation?.Stop();
+            double t = Math.Clamp(elapsedMilliseconds / duration, 0, 1);
+            return t >= 1 ? target : (float)(from + (target - from) * (1 - Math.Pow(1 - t, 3)));
         }
-        public void FinishAnimation() { _animation?.Stop(); _hoverAmount = _hover && Enabled ? 1 : 0; Invalidate(); }
-        protected override void OnMouseEnter(EventArgs e) { _hover = true; AnimateHover(); base.OnMouseEnter(e); }
-        protected override void OnMouseLeave(EventArgs e) { _hover = _pressed = false; AnimateHover(); base.OnMouseLeave(e); }
-        protected override void OnMouseDown(MouseEventArgs e) { if (e.Button == MouseButtons.Left) { _pressed = true; Invalidate(); } base.OnMouseDown(e); }
-        protected override void OnMouseUp(MouseEventArgs e) { _pressed = false; Invalidate(); base.OnMouseUp(e); }
-        protected override void OnEnabledChanged(EventArgs e) { FinishAnimation(); base.OnEnabledChanged(e); }
-        protected override void OnVisibleChanged(EventArgs e) { if (!Visible) { _hover = _pressed = false; FinishAnimation(); } base.OnVisibleChanged(e); }
+        private void SampleInteraction(double elapsedMilliseconds)
+        {
+            _hoverAmount = EaseInteraction(_hoverFrom, _hoverTarget, elapsedMilliseconds, 220);
+            _pressAmount = EaseInteraction(_pressFrom, _pressTarget, elapsedMilliseconds, _pressDuration);
+            _focusAmount = EaseInteraction(_focusFrom, _focusTarget, elapsedMilliseconds, 180);
+            _activeAmount = EaseInteraction(_activeFrom, _activeTarget, elapsedMilliseconds, 220);
+        }
+        private bool InteractionSettled() => _hoverAmount == _hoverTarget && _pressAmount == _pressTarget && _focusAmount == _focusTarget && _activeAmount == _activeTarget;
+        private void AdvanceInteraction()
+        {
+            if (!CanAnimate) { FinishAnimation(); return; }
+            SampleInteraction(Stopwatch.GetElapsedTime(_started).TotalMilliseconds); Invalidate();
+            if (InteractionSettled()) _animation?.Stop();
+        }
+        public void FinishAnimation()
+        {
+            _animation?.Stop(); _mouseDown = _keyboardDown = _pressed = false;
+            if (!InteractionVisible) _hover = false;
+            _hoverAmount = _hover && Enabled ? 1 : 0; _pressAmount = 0;
+            _focusAmount = Focused && ShowFocusCues && Enabled ? 1 : 0; _activeAmount = Active ? 1 : 0;
+            _hoverTarget = _hoverAmount; _pressTarget = _pressAmount; _focusTarget = _focusAmount; _activeTarget = _activeAmount;
+            Invalidate();
+        }
+        private void UpdatePressedState() { _pressed = _keyboardDown || (_mouseDown && _hover); AnimateInteraction(); }
+        protected override void OnMouseEnter(EventArgs e) { base.OnMouseEnter(e); _hover = true; UpdatePressedState(); }
+        protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); _hover = false; UpdatePressedState(); }
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            if (_mouseDown && _hover != ClientRectangle.Contains(e.Location)) { _hover = !_hover; UpdatePressedState(); }
+        }
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            if (e.Button == MouseButtons.Left && Enabled) { _mouseDown = _hover = true; UpdatePressedState(); }
+        }
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left) { _mouseDown = false; UpdatePressedState(); }
+            base.OnMouseUp(e);
+        }
+        protected override void OnMouseCaptureChanged(EventArgs e)
+        {
+            base.OnMouseCaptureChanged(e);
+            if (!Capture && _mouseDown) { _mouseDown = false; UpdatePressedState(); }
+        }
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            base.OnKeyDown(e);
+            if (e.KeyCode == Keys.Space && !e.Alt && !e.Control && Enabled && !_keyboardDown) { _keyboardDown = true; UpdatePressedState(); }
+        }
+        protected override void OnKeyUp(KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Space && _keyboardDown) { _keyboardDown = false; UpdatePressedState(); }
+            base.OnKeyUp(e);
+        }
+        protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); AnimateInteraction(); }
+        protected override void OnLostFocus(EventArgs e) { base.OnLostFocus(e); _mouseDown = _keyboardDown = false; UpdatePressedState(); }
+        protected override void OnChangeUICues(UICuesEventArgs e) { base.OnChangeUICues(e); AnimateInteraction(); }
+        protected override void OnEnabledChanged(EventArgs e) { base.OnEnabledChanged(e); _hover = false; FinishAnimation(); }
+        protected override void OnVisibleChanged(EventArgs e) { base.OnVisibleChanged(e); if (!Visible) { _hover = false; FinishAnimation(); } }
+        protected override void OnHandleDestroyed(EventArgs e) { FinishAnimation(); base.OnHandleDestroyed(e); }
         protected override void OnPaint(PaintEventArgs e)
         {
             e.Graphics.Clear(SurroundingColor(this)); if (Width < 2 || Height < 2) return;
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias; float scale = DeviceDpi / 96f;
-            var color = !Enabled ? Mix(BackColor, SurroundingColor(this), .35) : _pressed ? FlatAppearance.MouseDownBackColor : Mix(BackColor, FlatAppearance.MouseOverBackColor, _hoverAmount);
-            using var path = RoundPath(new RectangleF(.5f, .5f, Width - 1.5f, Height - 1.5f), 3 * scale);
+            var hoverColor = Mix(BackColor, FlatAppearance.MouseOverBackColor, Math.Max(_hoverAmount, _focusAmount * .4));
+            var color = !Enabled ? Mix(BackColor, SurroundingColor(this), .35) : Mix(hoverColor, FlatAppearance.MouseDownBackColor, _pressAmount);
+            float inset = Enabled ? Math.Min(_pressAmount * 1.2f * scale, Math.Max(0, (Math.Min(Width, Height) - 8 * scale) / 2)) : 0;
+            using var path = RoundPath(new RectangleF(.5f + inset, .5f + inset, Width - 1.5f - inset * 2, Height - 1.5f - inset * 2), 3 * scale);
             if (Primary && Enabled)
             {
                 using var fill = new LinearGradientBrush(ClientRectangle, Mix(color, Color.White, .07), Mix(color, Color.Black, .08), LinearGradientMode.Vertical);
@@ -150,16 +226,17 @@ public sealed partial class MainForm
             }
             else { using var fill = new SolidBrush(color); e.Graphics.FillPath(fill, path); }
             bool darkSidebarButton = LeftAligned && BackColor.GetBrightness() < .25f;
-            Color borderColor = darkSidebarButton ? Mix(Sidebar, Color.White, Active ? .2 : .1) : AccentBorder ? Mix(Line, Cyan, .5) : Line;
+            Color borderColor = darkSidebarButton ? Mix(Sidebar, Color.White, .1 + _activeAmount * .1) : AccentBorder ? Mix(Line, Cyan, .5) : Line;
             using var border = new Pen(borderColor); if (!Primary || !Enabled) e.Graphics.DrawPath(border, path);
-            if (Active && LeftAligned) { using var accent = new Pen(Mix(ForeColor, color, .2), 2.5f * scale); e.Graphics.DrawLine(accent, 1.5f * scale, 10 * scale, 1.5f * scale, Height - 10 * scale); }
+            if (_activeAmount > .001f && LeftAligned) { using var accent = new Pen(Mix(color, ForeColor, _activeAmount * .8), 2.5f * scale); float half = (Height / 2f - 10 * scale) * _activeAmount; e.Graphics.DrawLine(accent, 1.5f * scale, Height / 2f - half, 1.5f * scale, Height / 2f + half); }
             Color textColor = Enabled ? ForeColor : Mix(ForeColor, color, .55);
             var area = Rectangle.Inflate(ClientRectangle, -(int)(9 * scale), -(int)(2 * scale));
+            int contentOffset = (int)Math.Round(_pressAmount * scale); area.Offset(0, contentOffset);
             int iconSize = (int)(18 * scale), gap = (int)(8 * scale);
             if (IndexLabel is not null)
             {
                 using var indexFont = new Font("Segoe UI", 7.5f, FontStyle.Bold);
-                var indexArea = new Rectangle((int)(13 * scale), 0, (int)(23 * scale), Height);
+                var indexArea = new Rectangle((int)(13 * scale), contentOffset, (int)(23 * scale), Height);
                 TextRenderer.DrawText(e.Graphics, IndexLabel, indexFont, indexArea, Active ? Color.FromArgb(63, 69, 78) : Mix(textColor, color, .35), TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
                 area.X = (int)(43 * scale); area.Width = Math.Max(0, Width - area.X - (int)(8 * scale));
             }
@@ -168,14 +245,21 @@ public sealed partial class MainForm
                 int textWidth = TextRenderer.MeasureText(Text, Font, Size.Empty, TextFormatFlags.NoPadding | TextFormatFlags.SingleLine).Width;
                 int contentWidth = Math.Min(area.Width, textWidth + iconSize + gap);
                 int x = LeftAligned ? area.Left + (int)(4 * scale) : area.Left + Math.Max(0, (area.Width - contentWidth) / 2);
-                DrawGlyph(e.Graphics, IconKind, new RectangleF(x, (Height - iconSize) / 2f, iconSize, iconSize), textColor);
+                DrawGlyph(e.Graphics, IconKind, new RectangleF(x, (Height - iconSize) / 2f + contentOffset, iconSize, iconSize), textColor);
                 area.X = x + iconSize + gap; area.Width = Math.Max(0, ClientRectangle.Right - (int)(9 * scale) - area.X);
             }
             else if (LeftAligned) { area.X += (int)(7 * scale); area.Width -= (int)(7 * scale); }
             TextRenderer.DrawText(e.Graphics, Text, Font, area, textColor, (LeftAligned || IconKind != AppGlyph.None ? TextFormatFlags.Left : TextFormatFlags.HorizontalCenter) | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
-            if (Focused && ShowFocusCues) { using var focus = new Pen(Mix(textColor, color, .18), 1.5f); using var focusPath = RoundPath(new RectangleF(3 * scale, 3 * scale, Width - 6 * scale, Height - 6 * scale), 1 * scale); e.Graphics.DrawPath(focus, focusPath); }
+            if (_focusAmount > .001f || Focused && ShowFocusCues)
+            {
+                // Keyboard focus is readable immediately, then softly settles.
+                double strength = Focused && ShowFocusCues ? .65 + _focusAmount * .35 : _focusAmount;
+                using var focus = new Pen(Mix(color, Mix(textColor, color, .18), strength), 1.5f * scale);
+                using var focusPath = RoundPath(new RectangleF(3 * scale + inset, 3 * scale + inset, Width - 6 * scale - inset * 2, Height - 6 * scale - inset * 2), 1 * scale);
+                e.Graphics.DrawPath(focus, focusPath);
+            }
         }
-        protected override void Dispose(bool disposing) { if (disposing) _animation?.Dispose(); base.Dispose(disposing); }
+        protected override void Dispose(bool disposing) { if (disposing) { _animation?.Stop(); _animation?.Dispose(); _animation = null; } base.Dispose(disposing); }
     }
     private sealed class BrandMark : Control
     {

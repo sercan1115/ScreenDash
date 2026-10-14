@@ -18,6 +18,7 @@ public sealed partial class MainForm : Form
     private readonly Panel _content = new() { Dock = DockStyle.Fill, Margin = Padding.Empty }, _dashboard = new() { Dock = DockStyle.Fill }, _settingsPage = new() { Dock = DockStyle.Fill }, _recordingsPage = new() { Dock = DockStyle.Fill };
     private readonly Button[] _nav = new Button[4], _settingNav = new Button[4];
     private readonly Panel[] _settingTabs = new Panel[4];
+    private int _selectedSettingTab = -1;
     private readonly Label _pageTitle = TextLabel("Aufnahme", 27, Ink, FontStyle.Bold), _pageSubtitle = TextLabel("Dein Bildschirm. Als sicherer Rückblick.", 10, Muted), _headerState = new StatusPill { Text = "BEREIT", Dock = DockStyle.Fill, ForeColor = Cyan, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold), Margin = new Padding(0, 6, 0, 6) };
     private readonly Label _recordingState = TextLabel("Bereit für deinen Rückblick", 22, Ink, FontStyle.Bold), _recordingMessage = TextLabel("", 10, Muted), _elapsed = TextLabel("00:00:00", 28, Ink, FontStyle.Bold), _source = TextLabel("", 10, Muted);
     private readonly Label _encoder = TextLabel("GPU bevorzugt", 16, Ink, FontStyle.Bold), _cpu = TextLabel("0,0 %", 24, Ink, FontStyle.Bold), _memory = TextLabel("0 MB", 24, Ink, FontStyle.Bold), _fps = TextLabel("15 FPS", 24, Ink, FontStyle.Bold);
@@ -59,7 +60,7 @@ public sealed partial class MainForm : Form
     public MainForm(IAppController controller, bool startMinimized = false, bool enableHotkeys = true)
     {
         _controller = controller; _startMinimized = startMinimized; _enableHotkeys = enableHotkeys;
-        Text = "ScreenDash 1.6.0 · Bildschirm-Dashcam"; StartPosition = FormStartPosition.CenterScreen; ShowInTaskbar = true;
+        Text = "ScreenDash 1.6.1 · Bildschirm-Dashcam"; StartPosition = FormStartPosition.CenterScreen; ShowInTaskbar = true;
         ClientSize = new Size(1180, 780); MinimumSize = new Size(980, 660); AutoScaleMode = AutoScaleMode.Dpi;
         BackColor = Canvas; ForeColor = Ink; Font = new Font("Segoe UI", 10); DoubleBuffered = true;
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application; } catch { Icon = SystemIcons.Application; }
@@ -132,15 +133,23 @@ public sealed partial class MainForm : Form
     private void ShowPage(int page)
     {
         bool changed = _page != page;
+        if (changed) CompletePageTransition();
         _content.SuspendLayout();
         _page = page; _dashboard.Visible = page == 0; _settingsPage.Visible = page == 1; _recordingsPage.Visible = page == 2; _toolsPage.Visible = page == 3;
         (_pageTitle.Text, _pageSubtitle.Text) = page switch { 1 => ("Einstellungen", "Passe deine Bildschirm-Dashcam an deinen Alltag an."), 2 => ("Deine Aufnahmen", "Lesezeichen finden und Momente als Clip teilen."), 3 => ("Werkzeuge", "Deine Profile, Spielerkennung und Updates an einem Ort."), _ => ("Aufnahme", "Dein Bildschirm. Als sicherer Rückblick.") };
         for (int i = 0; i < _nav.Length; i++) SetNavigation(_nav[i], i == page);
         _content.ResumeLayout(true);
-        if (changed) BeginPageTransition();
         if (page == 2) RefreshRecordings(); if (page == 3) _ = ReloadProfilesAsync();
+        if (changed) BeginPageTransition();
     }
-    private void ShowSettingTab(int tab) { for (int i = 0; i < _settingTabs.Length; i++) { _settingTabs[i].Visible = i == tab; SetNavigation(_settingNav[i], i == tab); } }
+    private void ShowSettingTab(int tab)
+    {
+        bool changed = _selectedSettingTab != tab;
+        if (changed) CompletePageTransition();
+        _selectedSettingTab = tab;
+        for (int i = 0; i < _settingTabs.Length; i++) { _settingTabs[i].Visible = i == tab; SetNavigation(_settingNav[i], i == tab); }
+        if (changed) BeginSettingTabTransition();
+    }
     private static void SetNavigation(Button button, bool active)
     {
         var themed = (ThemeButton)button;

@@ -5,6 +5,7 @@ public sealed partial class MainForm
     private readonly Panel _toolsPage = new() { Dock = DockStyle.Fill }, _toolFields = new() { Dock = DockStyle.Fill };
     private readonly Button[] _toolNav = new Button[3];
     private readonly Panel[] _toolTabs = new Panel[3];
+    private int _selectedToolTab = -1;
     private readonly Button _bookmark = ActionButton("Lesezeichen"), _bookmarksSelected = ActionButton("Lesezeichen …"), _findTime = ActionButton("Zeitpunkt …");
     private readonly ToolStripMenuItem _trayBookmark;
     private readonly CheckBox _microphoneEnabled = Check("Mikrofon zusätzlich aufnehmen · standardmäßig aus"), _warnOnSilence = Check("Bei fehlendem Ton oder getrenntem Gerät warnen"), _gameDetection = Check("Bei ausgewählten Spielen automatisch aufnehmen");
@@ -52,7 +53,14 @@ public sealed partial class MainForm
         foreach (var panel in _toolTabs) { panel.AutoScroll = true; panel.Margin = Padding.Empty; } ShowToolTab(0);
     }
 
-    private void ShowToolTab(int tab) { for (int i = 0; i < _toolTabs.Length; i++) { _toolTabs[i].Visible = i == tab; SetNavigation(_toolNav[i], i == tab); } }
+    private void ShowToolTab(int tab)
+    {
+        bool changed = _selectedToolTab != tab;
+        if (changed) CompletePageTransition();
+        _selectedToolTab = tab;
+        for (int i = 0; i < _toolTabs.Length; i++) { _toolTabs[i].Visible = i == tab; SetNavigation(_toolNav[i], i == tab); }
+        if (changed) BeginToolTabTransition();
+    }
 
     private static FlowLayoutPanel FeatureActions(params Button[] buttons)
     {

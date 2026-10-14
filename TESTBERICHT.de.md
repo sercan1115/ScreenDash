@@ -1,5 +1,14 @@
 # ScreenDash – Prüfergebnis
 
+## Version 1.6.1 – 14. Oktober 2026
+
+- 199 Oberflächenprüfungen bei 96 DPI bestanden, einschließlich 32 neuer Prüfungen für sanfte Seiten-/Reiterübergänge, wiederverwendete Zwischenspeicher, stabile Klickflächen, fehlende Layoutberechnung pro Bild, schnelle Navigation sowie Aufräumen bei Größe, DPI, Minimieren und Schließen. Eingaben werden nicht verschluckt; der native Leertastenklick wird genau einmal ausgelöst. Hover-Richtungswechsel, Druckeffekt, Ziehen aus der Schaltfläche und verlorener Mausfang werden geprüft.
+- Seitenübergänge verwenden einen kurzen 240-ms-Timer mit 15-ms-Intervall und genau ein Bild des eigenen sichtbaren Fensterinhalts. Während der Bilder wird kein neuer Seitenspeicher angelegt und kein Bedienelement neu angeordnet. Das Bild ist auf vier Millionen Pixel begrenzt und wird bei Abschluss oder Abbruch freigegeben. Im synthetischen Vollbaum-Renderer wird die echte oberste Übergangsfläche zuletzt gezeichnet, da WinForms `DrawToBitmap` überlappende Kinder in anderer Reihenfolge als das angezeigte Fenster ausgeben kann.
+- Der Hintergrund hat einen 40-ms-Timer, also höchstens 25 geplante Bilder pro Sekunde. Ausschalten und Wiedereinschalten erhalten die Phase. Alle Animationen berücksichtigen die Windows-Animationsoptionen und hohen Kontrast. Minimierte oder versteckte Fenster planen keine Hintergrundbilder; laufende Aufnahmezustände bleiben erhalten.
+- Synthetischer direkter Zeichentest bei 96 DPI, zwölf logischen Prozessoren und 116.306 Hintergrundpixeln: 84 Bilder in rund vier Sekunden, 250 ms gesamte CPU-Zeit des Hilfsprogramms (0,52 % über alle logischen Prozessoren) und kein zusätzlicher GDI-Handle. Ausgeschaltet 78,12 ms, minimiert 31,25 ms und jeweils null Animationsbilder. Die Messung enthält die echten GDI-Zeichnungen, aber keine Windows-Pufferkopien, kein Spiel und keinen Encoder; sie ist keine Zusage für Gaming-FPS oder eine lastfreie Aufnahme.
+- Die Oberfläche wurde bei 1180 × 780, 1024 × 720, 1440 × 900 und 980 × 660 gerendert. Eine native Animationsvorschau mit Beispieldaten zeigt Hover, Druck, Seiten- und Reiterwechsel. Bildschirm und Ton werden dafür nicht aufgenommen.
+- Mit den bestehenden 177 Funktions-, 20 Windows-Verknüpfungs- und 5 Signierprüfungen umfasst Build/CI **401 Prüfungen ohne reale Aufnahme**. Es gibt keine zusätzlichen NuGet-Pakete oder Änderungen am Aufnahme- und Audiopfad. Release-Build ohne Warnungen und Fehler; EXE weiterhin unsigniert.
+
 ## Version 1.6.0 – 14. Oktober 2026
 
 - 167 Oberflächenprüfungen bestanden bei 96 DPI, einschließlich 20 neuer Prüfungen für sichtbare Bewegung, sofortiges Ausschalten, Speichern der Auswahl, Wiederherstellen, Minimieren, Verstecken und Freigeben des Hintergrundtimers. Der Schalter im Infobereich funktioniert während einer künstlichen Aufnahme, ohne Aufnahme oder gespeicherte Aufnahme-Einstellungen zu verändern.

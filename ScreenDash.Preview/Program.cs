@@ -28,7 +28,7 @@ internal static class Program
         using var controller = new PreviewController();
         using var form = new MainForm(controller, enableHotkeys: false);
         form.Icon = previewIcon;
-        form.Text = "ScreenDash 1.6.0 · Vorschau mit Beispieldaten";
+        form.Text = "ScreenDash 1.6.1 · Vorschau mit Beispieldaten";
         form.StartPosition = FormStartPosition.Manual;
         form.Location = new Point(-20000, -20000);
         form.ClientSize = new Size(1180, 780);
@@ -39,6 +39,10 @@ internal static class Program
         if (args.Contains("--ambient-frames", StringComparer.Ordinal))
         {
             RenderAmbientFrames(form, controller, output, args.Contains("--ambient-full-cycle", StringComparer.Ordinal)); return;
+        }
+        if (args.Contains("--interaction-frames", StringComparer.Ordinal))
+        {
+            RenderInteractionFrames(form, controller, output); return;
         }
         if (args.Contains("--ambient-benchmark", StringComparer.Ordinal))
         {
@@ -178,7 +182,27 @@ internal static class Program
             foreach (Control control in form.Controls.Cast<Control>().Reverse()) control.DrawToBitmap(bitmap, control.Bounds);
         }
         else form.DrawToBitmap(bitmap, new Rectangle(Point.Empty, form.Size));
+        if (form is MainForm && typeof(MainForm).GetField("_pageTransition", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(form) is Control { Visible: true } overlay)
+        {
+            // WinForms WM_PRINT can enumerate overlapping child windows in a different order from
+            // their displayed z-order. Composite the real topmost native overlay last in this
+            // off-screen renderer; no production animation or image is recreated here.
+            Point overlayOrigin = form.PointToClient(overlay.PointToScreen(Point.Empty));
+            if (!clientOnly)
+            {
+                Point clientOrigin = form.PointToScreen(Point.Empty);
+                overlayOrigin.Offset(clientOrigin.X - form.Left, clientOrigin.Y - form.Top);
+            }
+            overlay.DrawToBitmap(bitmap, new Rectangle(overlayOrigin, overlay.Size));
+        }
         return bitmap;
+    }
+
+    private static string ClientRenderHash(Form form)
+    {
+        using var bitmap = CaptureBitmap(form, clientOnly: true);
+        using var bytes = new MemoryStream(); bitmap.Save(bytes, ImageFormat.Png);
+        return Convert.ToHexString(SHA256.HashData(bytes.GetBuffer().AsSpan(0, checked((int)bytes.Length))));
     }
 
     private static void PumpMessages(int milliseconds)
@@ -197,9 +221,9 @@ internal static class Program
         controller.Recording = true;
         MainFormCall(form, "RefreshDashboard"); MainFormCall(form, "ShowPage", 0);
         MainFormCall(form, "CompletePageTransition"); MainFormCall(form, "ConfigureAmbientBackground", false);
-        const int framesPerSecond = 10;
+        const int framesPerSecond = 25;
         const double nativePeriodSeconds = 36;
-        int frameCount = fullCycle ? framesPerSecond * (int)nativePeriodSeconds : 120;
+        int frameCount = framesPerSecond * (fullCycle ? (int)nativePeriodSeconds : 12);
         for (int frame = 0; frame < frameCount; frame++)
         {
             MainFormCall(form, "SetAmbientPreviewPhase", frame * Math.Tau / (framesPerSecond * nativePeriodSeconds));
@@ -211,6 +235,117 @@ internal static class Program
             NativePeriodSeconds = nativePeriodSeconds, FullCycle = fullCycle, SyntheticRecordingData = true
         }, new JsonSerializerOptions { WriteIndented = true }));
         Console.WriteLine($"Ambient sequence: {frameCount} native client frames at {framesPerSecond} FPS; {frameCount / framesPerSecond} seconds of real-speed motion; full cycle: {fullCycle}; synthetic recording data.");
+    }
+
+    private static void RenderInteractionFrames(MainForm form, PreviewController controller, string output)
+    {
+        // Draw the application's native controls and cached overlays with synthetic controller data.
+        // The ambient phase is held still in this interaction demonstration so its short GIF can loop
+        // without shortening the independent 36-second ambient cycle.
+        const BindingFlags flags = BindingFlags.NonPublic | BindingFlags.Instance;
+        const int framesPerSecond = 50;
+        _clientOnlySnapshots = true;
+        controller.Recording = false;
+        MainFormCall(form, "ConfigureAmbientBackground", false);
+        MainFormCall(form, "SetAmbientPreviewPhase", 0d);
+        MainFormCall(form, "ShowPage", 0); MainFormCall(form, "CompletePageTransition");
+        MainFormCall(form, "RefreshDashboard");
+        LayoutTree(form); Application.DoEvents();
+        int frameNumber = 0;
+        double timelineMilliseconds = 0;
+        var buttonClocks = new Dictionary<Button, (long WrittenTimestamp, double TimelineStart)>();
+        var animatedButtons = ControlsIn(form).OfType<Button>()
+            .Where(button => button.GetType().GetMethod("AdvanceInteraction", flags) is not null).ToArray();
+        T Field<T>(string name) where T : class => (T)typeof(MainForm).GetField(name, flags)!.GetValue(form)!;
+        void ButtonEvent(Button button, string name, EventArgs arguments) =>
+            button.GetType().GetMethod(name, flags)!.Invoke(button, [arguments]);
+        void AdvanceButton(Button button, double elapsedMilliseconds)
+        {
+            if (!WindowsMotionEnabled()) return;
+            var type = button.GetType();
+            (type.GetField("_animation", flags)!.GetValue(button) as System.Windows.Forms.Timer)?.Stop();
+            type.GetField("_started", flags)!.SetValue(button,
+                Stopwatch.GetTimestamp() - (long)(elapsedMilliseconds * Stopwatch.Frequency / 1000));
+            type.GetMethod("AdvanceInteraction", flags)!.Invoke(button, null);
+        }
+        void AdvanceAllButtons()
+        {
+            if (!WindowsMotionEnabled()) return;
+            foreach (var button in animatedButtons)
+            {
+                var type = button.GetType();
+                bool running = (bool)type.GetProperty("AnimationRunning")!.GetValue(button)!;
+                bool tracked = buttonClocks.TryGetValue(button, out var clock);
+                if (!running && !tracked) continue;
+                long started = (long)type.GetField("_started", flags)!.GetValue(button)!;
+                // Each production event retargets the animation and writes a fresh timestamp.
+                // Advance every affected button, including the old navigation marker, against
+                // the same synthetic timeline instead of leaving unrelated timers frozen.
+                if (!tracked || started != clock.WrittenTimestamp)
+                    clock.TimelineStart = timelineMilliseconds - 1000d / framesPerSecond;
+                AdvanceButton(button, timelineMilliseconds - clock.TimelineStart);
+                if ((bool)type.GetMethod("InteractionSettled", flags)!.Invoke(button, null)!) buttonClocks.Remove(button);
+                else buttonClocks[button] = ((long)type.GetField("_started", flags)!.GetValue(button)!, clock.TimelineStart);
+            }
+        }
+        void RenderSegment(int milliseconds, Action<double>? advance = null)
+        {
+            int segmentFrames = (int)Math.Ceiling(milliseconds * framesPerSecond / 1000d);
+            for (int frame = 0; frame < segmentFrames; frame++)
+            {
+                timelineMilliseconds += 1000d / framesPerSecond;
+                advance?.Invoke((frame + 1) * 1000d / framesPerSecond);
+                AdvanceAllButtons();
+                using var bitmap = CaptureBitmap(form, clientOnly: true);
+                bitmap.Save(Path.Combine(output, $"Interaction-{frameNumber++:000}.png"), ImageFormat.Png);
+            }
+        }
+        void ChangePage(Button button)
+        {
+            ButtonEvent(button, "OnMouseUp", new MouseEventArgs(MouseButtons.Left, 1, button.Width / 2, button.Height / 2, 0));
+            button.PerformClick();
+            MainFormCall(form, "SetPageTransitionPreviewProgress", 0d);
+        }
+        void RenderPageTransition(Button button)
+        {
+            RenderSegment(240, elapsed =>
+            {
+                MainFormCall(form, "SetPageTransitionPreviewProgress", Math.Min(1, elapsed / 240));
+            });
+        }
+        void EnterAndPress(Button button)
+        {
+            ButtonEvent(button, "OnMouseEnter", EventArgs.Empty);
+            RenderSegment(220);
+            ButtonEvent(button, "OnMouseDown", new MouseEventArgs(MouseButtons.Left, 1, button.Width / 2, button.Height / 2, 0));
+            RenderSegment(90);
+        }
+        void Leave(Button button)
+        {
+            ButtonEvent(button, "OnMouseLeave", EventArgs.Empty);
+            RenderSegment(220);
+        }
+        var settings = Field<Button[]>("_nav")[1];
+        var automation = Field<Button[]>("_settingNav")[3];
+        var capture = Field<Button[]>("_nav")[0];
+        RenderSegment(400);
+        EnterAndPress(settings); ChangePage(settings); RenderPageTransition(settings); Leave(settings);
+        RenderSegment(400);
+        EnterAndPress(automation); ChangePage(automation); RenderPageTransition(automation); Leave(automation);
+        RenderSegment(600);
+        EnterAndPress(capture); ChangePage(capture); RenderPageTransition(capture); Leave(capture);
+        RenderSegment(500);
+        MainFormCall(form, "CompletePageTransition");
+        File.WriteAllText(Path.Combine(output, "Interaction-Frames.json"), JsonSerializer.Serialize(new
+        {
+            Frames = frameNumber, FramesPerSecond = framesPerSecond,
+            DurationSeconds = frameNumber / (double)framesPerSecond,
+            PageTransitionMilliseconds = 240, HoverMilliseconds = 220,
+            PressMilliseconds = 90, ReleaseMilliseconds = 160,
+            WindowsAnimationEnabled = WindowsMotionEnabled(), BackgroundFrozenForInteractionDemo = true,
+            SyntheticRecordingData = true, Source = "Native WinForms controls and production transition overlays"
+        }, new JsonSerializerOptions { WriteIndented = true }));
+        Console.WriteLine($"Interaction sequence: {frameNumber} native client frames at {framesPerSecond} FPS; synthetic controller data; no desktop capture.");
     }
 
     private static void RunAmbientBenchmark(MainForm form, PreviewController controller, string output, bool directPaintOnly = false)
@@ -261,14 +396,25 @@ internal static class Program
             }
             elapsed.Stop();
             double cpuMilliseconds = (process.TotalProcessorTime - cpuStarted).TotalMilliseconds;
+            int scheduledFrames = Frames() - initialFrames;
+            int gdiHandleChange = GetGuiResources(process.Handle, 0) - initialGdi;
+            int schedulerInterval = ((System.Windows.Forms.Timer)typeof(MainForm).GetField("_ambientTimer", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(form)!).Interval;
+            bool boundedSchedule = scheduledFrames <= Math.Ceiling(elapsed.Elapsed.TotalMilliseconds / schedulerInterval) + 2;
+            bool stoppedWhenInactive = enabled && !minimized || scheduledFrames == 0;
+            bool drawingResourcesStable = gdiHandleChange <= 4;
+            if (!boundedSchedule || !stoppedWhenInactive || !drawingResourcesStable)
+                throw new InvalidOperationException($"Ambient benchmark failed for {state}: frames {scheduledFrames}, interval {schedulerInterval}, GDI change {gdiHandleChange}.");
             return new
             {
                 State = state, ElapsedMilliseconds = Math.Round(elapsed.Elapsed.TotalMilliseconds, 2),
                 CpuMilliseconds = Math.Round(cpuMilliseconds, 2),
                 CpuPercentOfOneCore = Math.Round(cpuMilliseconds / elapsed.Elapsed.TotalMilliseconds * 100, 3),
                 CpuPercentOfMachine = Math.Round(cpuMilliseconds / elapsed.Elapsed.TotalMilliseconds / Environment.ProcessorCount * 100, 3),
-                BackgroundFrames = Frames() - initialFrames, ForcedBackgroundRenders = renderedFrames,
-                GdiHandleChange = GetGuiResources(process.Handle, 0) - initialGdi
+                BackgroundFrames = scheduledFrames, ForcedBackgroundRenders = renderedFrames,
+                SchedulerIntervalMilliseconds = schedulerInterval,
+                ObservedFramesPerSecond = Math.Round(scheduledFrames / elapsed.Elapsed.TotalSeconds, 3),
+                BoundedSchedule = boundedSchedule, StoppedWhenInactive = stoppedWhenInactive,
+                DrawingResourcesStable = drawingResourcesStable, GdiHandleChange = gdiHandleChange
             };
         }
         var samples = new[] { Measure("visible-background-off", false, false), Measure("visible-background-on", true, false), Measure("minimized-background-on", true, true) };
@@ -611,33 +757,76 @@ internal static class Program
         Check(Field<Label>("_archivePageLabel").Text.StartsWith("Seite 4") && grid.SelectedRows.Count == 1 && ((RecordingInfo)grid.SelectedRows[0].Tag!).Path == target.Path, "time search can reveal and select a match beyond the first archive page");
         Check(Field<Button>("_bookmarksSelected").Enabled, "single archive selection exposes saved moments");
         // Navigation and hover remain finite; the separately configured ambient layer has its own bounded timer.
-        Call("SetMotionEnabled", true); Call("CompletePageTransition");
+        Call("SetMotionEnabled", false); Call("SetMotionEnabled", true); Call("CompletePageTransition"); Call("ConfigureAmbientBackground", false);
         var pageTimer = Field<System.Windows.Forms.Timer>("_pageMotionTimer");
         int MotionFrames() => (int)typeof(MainForm).GetField("_motionFrameCount", flags)!.GetValue(form)!;
+        int PageCaptures() => (int)typeof(MainForm).GetField("_pageTransitionCaptureCount", flags)!.GetValue(form)!;
+        Control? PageOverlay() => typeof(MainForm).GetField("_pageTransition", flags)!.GetValue(form) as Control;
         void PumpFor(int milliseconds)
         {
             var until = System.Diagnostics.Stopwatch.StartNew();
             while (until.ElapsedMilliseconds < milliseconds) { Application.DoEvents(); Thread.Sleep(5); }
         }
-        Check(!pageTimer.Enabled && Field<Panel>("_content").Padding == Padding.Empty, "settled UI has no page animation timer or residual offset");
+        Check(pageTimer.Interval is >= 15 and <= 20, "short page transitions use a smooth bounded scheduling interval");
+        Check(!pageTimer.Enabled && PageOverlay() is null && Field<Panel>("_content").Padding == Padding.Empty, "settled UI has no page animation timer, cached overlay or residual offset");
+        var stableControls = new Control[] { Field<Panel>("_content"), grid, search, date, Field<Button[]>("_nav")[2] };
+        var stableBounds = stableControls.Select(control => control.Bounds).ToArray();
+        int captures = PageCaptures();
         int frames = MotionFrames(); Call("BeginPageTransition");
         bool systemMotion = WindowsMotionEnabled();
         Check(pageTimer.Enabled == systemMotion, "visible page transitions respect the Windows animation and high contrast preferences");
+        var firstOverlay = PageOverlay();
+        Check(systemMotion ? firstOverlay is not null && PageCaptures() == captures + 1 : firstOverlay is null && PageCaptures() == captures, "one visible transition captures its incoming controls once while reduced motion creates no bitmap");
+        int transitionLayouts = 0;
+        LayoutEventHandler layoutCounter = (_, _) => transitionLayouts++;
+        Field<Panel>("_content").Layout += layoutCounter;
+        Call("SetPageTransitionPreviewProgress", .25d);
+        string transitionQuarter = ClientRenderHash(form);
+        Call("SetPageTransitionPreviewProgress", .75d);
+        string transitionThreeQuarters = ClientRenderHash(form);
+        Field<Panel>("_content").Layout -= layoutCounter;
+        Check(stableBounds.SequenceEqual(stableControls.Select(control => control.Bounds)) && transitionLayouts == 0 && Field<Panel>("_content").Padding == Padding.Empty,
+            "transition frames do not relayout controls or move their hit targets");
+        Check(systemMotion ? transitionQuarter != transitionThreeQuarters : transitionQuarter == transitionThreeQuarters, "cached page phases visibly fade and slide while reduced motion stays immediate");
+        Check(ReferenceEquals(firstOverlay, PageOverlay()) && PageCaptures() == captures + (systemMotion ? 1 : 0), "painting multiple transition phases reuses the same overlay and snapshot");
+        Call("SetPageTransitionPreviewProgress", 1d);
+        Check(PageOverlay() is null && !pageTimer.Enabled && (firstOverlay is null || firstOverlay.IsDisposed), "completing a transition releases its overlay and image immediately");
+        Call("BeginPageTransition");
         PumpFor(350);
-        Check(!pageTimer.Enabled && (systemMotion ? MotionFrames() > frames : MotionFrames() == frames) && Field<Panel>("_content").Padding == Padding.Empty, "page transition completes and removes its temporary offset");
+        Check(!pageTimer.Enabled && PageOverlay() is null && (systemMotion ? MotionFrames() > frames : MotionFrames() == frames) && Field<Panel>("_content").Padding == Padding.Empty, "elapsed-time page transitions complete and release their temporary rendering state");
         frames = MotionFrames(); PumpFor(80);
         Check(MotionFrames() == frames, "settled pages do not schedule further animation frames");
         Call("BeginPageTransition"); form.Hide(); Application.DoEvents();
-        Check(!pageTimer.Enabled && Field<Panel>("_content").Padding == Padding.Empty, "hiding the window immediately stops animation and resets layout");
+        Check(!pageTimer.Enabled && PageOverlay() is null && Field<Panel>("_content").Padding == Padding.Empty, "hiding the window immediately stops animation and releases its cache");
         frames = MotionFrames(); Call("BeginPageTransition"); PumpFor(40);
         Check(!pageTimer.Enabled && MotionFrames() == frames, "hidden windows never begin a transition");
         form.Show(); Call("SetMotionEnabled", false); Call("BeginPageTransition");
-        Check(!pageTimer.Enabled && Field<Panel>("_content").Padding == Padding.Empty, "disabled motion keeps navigation immediate and timer-free");
+        Check(!pageTimer.Enabled && PageOverlay() is null && Field<Panel>("_content").Padding == Padding.Empty, "disabled motion keeps navigation immediate and timer-free");
         Call("SetMotionEnabled", true);
+        using var navigationProcess = Process.GetCurrentProcess();
+        int navigationGdi = GetGuiResources(navigationProcess.Handle, 0);
         for (int i = 0; i < 40; i++) Call("ShowPage", i % 4);
-        Call("CompletePageTransition"); Application.DoEvents();
+        Call("CompletePageTransition"); PumpFor(280);
         Check(Field<Panel>("_toolsPage").Visible && !Field<Panel>("_dashboard").Visible && !Field<Panel>("_settingsPage").Visible && !Field<Panel>("_recordingsPage").Visible, "rapid page navigation leaves exactly the final page visible");
-        Check(!pageTimer.Enabled && Field<Panel>("_content").Padding == Padding.Empty, "rapid navigation does not retain queued animation or a shifted page");
+        Check(!pageTimer.Enabled && PageOverlay() is null && Field<Panel>("_content").Padding == Padding.Empty, "rapid navigation does not retain queued animation, overlays or a shifted page");
+        Check(GetGuiResources(navigationProcess.Handle, 0) <= navigationGdi + 4, "rapid navigation releases replaced snapshot images instead of accumulating GDI handles");
+        Call("BeginPageTransition");
+        var sizeBeforeTransition = form.ClientSize;
+        form.ClientSize = new Size(sizeBeforeTransition.Width + 1, sizeBeforeTransition.Height); Application.DoEvents();
+        Check(!pageTimer.Enabled && PageOverlay() is null, "resizing immediately releases a transition whose captured content would no longer align");
+        form.ClientSize = sizeBeforeTransition; LayoutTree(form); Application.DoEvents();
+        Call("BeginPageTransition"); Call("MotionDpiChanged", form, null!);
+        Check(!pageTimer.Enabled && PageOverlay() is null && form.ClientSize == sizeBeforeTransition, "a DPI-change notification cancels cached animation even when window bounds stay unchanged");
+        Call("ShowPage", 1); Call("CompletePageTransition"); Call("ShowSettingTab", 0); Call("CompletePageTransition");
+        captures = PageCaptures(); Call("ShowSettingTab", 3);
+        Check(systemMotion ? PageOverlay() is not null && PageCaptures() == captures + 1 : PageOverlay() is null, "changing a settings tab smoothly reveals only its incoming content");
+        var automationBounds = Field<CheckBox>("_animatedBackground").Bounds;
+        Call("SetPageTransitionPreviewProgress", .5d);
+        Check(Field<CheckBox>("_animatedBackground").Bounds == automationBounds && Field<Panel>("_content").Padding == Padding.Empty, "settings tab effects keep live input positions and page layout stable");
+        Call("CompletePageTransition"); Call("ShowPage", 3); Call("CompletePageTransition"); Call("ShowToolTab", 0); Call("CompletePageTransition");
+        captures = PageCaptures(); Call("ShowToolTab", 1);
+        Check(systemMotion ? PageOverlay() is not null && PageCaptures() == captures + 1 : PageOverlay() is null, "changing a tool tab uses one bounded incoming-content snapshot");
+        Call("CompletePageTransition"); Call("ShowToolTab", 0); Call("CompletePageTransition");
         Call("ShowPage", 2); Call("CompletePageTransition"); form.PerformLayout(); Application.DoEvents();
         Check(grid.ClientSize.Width > 500 * form.DeviceDpi / 96 && grid.ClientSize.Height > 150 * form.DeviceDpi / 96, "compact archive preserves a readable table viewport");
         Check(grid.Columns.Cast<DataGridViewColumn>().Where(column => column.Visible).All(column => column.Width >= column.MinimumWidth), "archive columns respect their readable minimum widths");
@@ -654,6 +843,15 @@ internal static class Program
         var hoverType = hoverButton.GetType();
         bool HoverRunning() => (bool)hoverType.GetProperty("AnimationRunning")!.GetValue(hoverButton)!;
         void HoverEvent(string name) => hoverType.GetMethod(name, flags)!.Invoke(hoverButton, [EventArgs.Empty]);
+        void InteractionEvent(string name, EventArgs arguments) => hoverType.GetMethod(name, flags)!.Invoke(hoverButton, [arguments]);
+        float InteractionAmount(string name) => (float)hoverType.GetField(name, flags)!.GetValue(hoverButton)!;
+        void AdvanceInteraction(double milliseconds)
+        {
+            if (!systemMotion) return;
+            hoverType.GetField("_started", flags)!.SetValue(hoverButton, Stopwatch.GetTimestamp() - (long)(milliseconds * Stopwatch.Frequency / 1000));
+            hoverType.GetMethod("AdvanceInteraction", flags)!.Invoke(hoverButton, null);
+        }
+        PumpFor(280);
         Check(!HoverRunning(), "idle navigation buttons do not run an animation timer");
         HoverEvent("OnMouseEnter");
         Check(HoverRunning() == systemMotion, "button hover follows Windows motion preferences");
@@ -663,6 +861,59 @@ internal static class Program
         form.Show(); Call("SetMotionEnabled", false); HoverEvent("OnMouseEnter");
         Check(!HoverRunning(), "motion disabled also prevents animated button hovers");
         HoverEvent("OnMouseLeave"); Call("SetMotionEnabled", true); Call("CompletePageTransition");
+        var hoverBounds = hoverButton.Bounds;
+        HoverEvent("OnMouseEnter"); AdvanceInteraction(60);
+        float partialHover = InteractionAmount("_hoverAmount");
+        Check(systemMotion ? partialHover is > 0 and < 1 : partialHover == 1, "hover enters through intermediate visual states instead of switching its colour at once");
+        HoverEvent("OnMouseLeave");
+        Check(systemMotion ? Math.Abs(InteractionAmount("_hoverAmount") - partialHover) < .1 : InteractionAmount("_hoverAmount") == 0, "reversing a hover starts from its currently displayed highlight while reduced motion changes immediately");
+        AdvanceInteraction(70);
+        float reversedHover = InteractionAmount("_hoverAmount");
+        Check(systemMotion ? reversedHover > 0 && reversedHover < partialHover : reversedHover == 0, "a reversed hover fades toward its new target without overshooting");
+        HoverEvent("OnMouseEnter");
+        Check(systemMotion ? Math.Abs(InteractionAmount("_hoverAmount") - reversedHover) < .1 : InteractionAmount("_hoverAmount") == 1, "a second quick hover reversal preserves continuity while reduced motion remains immediate");
+        AdvanceInteraction(60);
+        Check(InteractionAmount("_hoverAmount") is >= 0 and <= 1 && hoverButton.Bounds == hoverBounds, "repeated hover reversals preserve bounded visual values and the original hit target");
+        var interactionTimer = hoverType.GetField("_animation", flags)!.GetValue(hoverButton) as System.Windows.Forms.Timer;
+        Check(!systemMotion || interactionTimer is { Interval: >= 15 and <= 20 }, "short button transitions use a bounded smooth scheduling interval");
+        HoverEvent("OnMouseLeave"); PumpFor(280);
+        InteractionEvent("OnMouseDown", new MouseEventArgs(MouseButtons.Left, 1, hoverButton.Width / 2, hoverButton.Height / 2, 0));
+        AdvanceInteraction(40);
+        Check(systemMotion ? InteractionAmount("_pressAmount") is > 0 and < 1 : InteractionAmount("_pressAmount") == 1, "pointer presses animate through intermediate depth and colour states");
+        hoverButton.Capture = false; InteractionEvent("OnMouseCaptureChanged", EventArgs.Empty); PumpFor(280);
+        Check(InteractionAmount("_pressAmount") == 0 && !(bool)hoverType.GetField("_mouseDown", flags)!.GetValue(hoverButton)!, "losing pointer capture releases the pressed appearance instead of leaving a stuck button");
+        InteractionEvent("OnMouseDown", new MouseEventArgs(MouseButtons.Left, 1, hoverButton.Width / 2, hoverButton.Height / 2, 0));
+        AdvanceInteraction(100);
+        InteractionEvent("OnMouseMove", new MouseEventArgs(MouseButtons.Left, 0, -2, -2, 0)); AdvanceInteraction(180);
+        Check(InteractionAmount("_pressAmount") == 0, "dragging outside a pressed button smoothly releases its visual pressure");
+        InteractionEvent("OnMouseMove", new MouseEventArgs(MouseButtons.Left, 0, hoverButton.Width / 2, hoverButton.Height / 2, 0)); AdvanceInteraction(100);
+        Check(InteractionAmount("_pressAmount") == 1 && hoverButton.Bounds == hoverBounds, "dragging back into a held button restores the pressure without moving its hit target");
+        InteractionEvent("OnMouseUp", new MouseEventArgs(MouseButtons.Left, 1, hoverButton.Width / 2, hoverButton.Height / 2, 0)); PumpFor(280);
+        Check(InteractionAmount("_pressAmount") == 0 && !HoverRunning(), "pointer release settles the button and stops finite animation scheduling");
+        Call("BeginPageTransition");
+        var inputFilter = (IMessageFilter)typeof(MainForm).GetField("_transitionInputFilter", flags)!.GetValue(form)!;
+        var inputMessage = Message.Create(Field<Button>("_toggle").Handle, 0x0201, 1, 0);
+        bool swallowed = inputFilter.PreFilterMessage(ref inputMessage);
+        int startsBeforeAnimatedClick = controller.StartRequests;
+        Field<Button>("_toggle").PerformClick();
+        Check(!swallowed && PageOverlay() is null && controller.StartRequests == startsBeforeAnimatedClick + 1,
+            "click input dismisses the visual overlay and still reaches the live capture action exactly once");
+        Call("BeginPageTransition"); inputMessage = Message.Create(hoverButton.Handle, 0x0100, (nint)Keys.Space, 0);
+        swallowed = inputFilter.PreFilterMessage(ref inputMessage);
+        Check(!swallowed && PageOverlay() is null, "keyboard input dismisses cached visuals without swallowing the key");
+        int keyboardClicks = 0;
+        EventHandler keyboardClick = (_, _) => keyboardClicks++;
+        hoverButton.Click += keyboardClick;
+        hoverButton.Focus(); SendMessage(hoverButton.Handle, 0x0100, (nint)Keys.Space, 1); AdvanceInteraction(40);
+        long keyboardStarted = (long)hoverType.GetField("_started", flags)!.GetValue(hoverButton)!;
+        SendMessage(hoverButton.Handle, 0x0100, (nint)Keys.Space, unchecked((nint)0x40000001u));
+        Check((bool)hoverType.GetField("_keyboardDown", flags)!.GetValue(hoverButton)! && (long)hoverType.GetField("_started", flags)!.GetValue(hoverButton)! == keyboardStarted,
+            "holding Space preserves the ongoing pressure transition instead of restarting it for every key repeat");
+        SendMessage(hoverButton.Handle, 0x0101, (nint)Keys.Space, unchecked((nint)0xC0000001u)); PumpFor(280);
+        hoverButton.Click -= keyboardClick;
+        Check(keyboardClicks == 1 && InteractionAmount("_pressAmount") == 0 && !(bool)hoverType.GetField("_keyboardDown", flags)!.GetValue(hoverButton)!,
+            "native Space-key activation clicks exactly once and releases its animated pressure");
+        HoverEvent("OnMouseLeave"); PumpFor(280); Call("CompletePageTransition");
         Point restoredLocation = form.Location;
         Size restoredClientSize = form.ClientSize;
         int stopRequests = controller.StopRequests;
@@ -671,7 +922,7 @@ internal static class Program
         Check(pageTimer.Enabled == systemMotion && HoverRunning() == systemMotion, "visible recording window can start finite page and hover transitions");
         form.WindowState = FormWindowState.Minimized; Application.DoEvents();
         Check(form.Visible && form.ShowInTaskbar && form.WindowState == FormWindowState.Minimized, "minimizing retains the visible native window and taskbar entry");
-        Check(!pageTimer.Enabled && !HoverRunning() && Field<Panel>("_content").Padding == Padding.Empty, "minimizing immediately finishes page and hover motion without requiring the window to be hidden");
+        Check(!pageTimer.Enabled && PageOverlay() is null && !HoverRunning() && InteractionAmount("_pressAmount") == 0 && Field<Panel>("_content").Padding == Padding.Empty, "minimizing immediately releases the page cache and finite button motion without requiring the window to be hidden");
         frames = MotionFrames(); Call("BeginPageTransition"); HoverEvent("OnMouseLeave"); HoverEvent("OnMouseEnter"); PumpFor(100);
         Check(!pageTimer.Enabled && !HoverRunning() && MotionFrames() == frames, "minimized taskbar windows never start motion or schedule animation frames");
         Check(controller.Recording && controller.StopRequests == stopRequests, "minimizing leaves an active recording running");
@@ -706,7 +957,7 @@ internal static class Program
         int AmbientFrames() => (int)typeof(MainForm).GetField("_ambientFrameCount", flags)!.GetValue(form)!;
         Check(new AppSettings().AnimatedBackground && ambientChoice.Checked && ((AppSettings)Call("ReadSettings")!).AnimatedBackground, "fresh and existing settings keep the moving background enabled by default");
         Check(!string.IsNullOrWhiteSpace(ambientChoice.AccessibleName), "the background preference has an accessible user-facing label");
-        Check(ambientTimer.Interval >= 67, "background scheduling is capped below fifteen frames per second");
+        Check(ambientTimer.Interval is >= 40 and <= 50, "smooth background scheduling stays bounded at twenty to twenty-five frames per second");
         ambientChoice.Checked = false;
         Check(!((AppSettings)Call("ReadSettings")!).AnimatedBackground && !ambientTimer.Enabled, "switching the background off immediately stops its timer and becomes a settings draft");
         var ambientSaveTask = (Task)Call("SaveSettingsAsync")!; PumpFor(30);
@@ -718,6 +969,18 @@ internal static class Program
         Check(ambientSaveTask.IsCompletedSuccessfully && controller.Settings.AnimatedBackground && ambientChoice.Checked && ambientTimer.Enabled == systemMotion, "saved background motion resumes only when Windows allows animation");
         int ambientFrames = AmbientFrames(); PumpFor(360);
         Check(systemMotion ? AmbientFrames() > ambientFrames : AmbientFrames() == ambientFrames, "visible enabled backgrounds advance frames while reduced motion keeps them still");
+        var ambientElapsed = Stopwatch.StartNew(); ambientFrames = AmbientFrames();
+        PumpFor(600); ambientElapsed.Stop();
+        int visibleAmbientFrames = AmbientFrames() - ambientFrames;
+        Check(visibleAmbientFrames <= Math.Ceiling(ambientElapsed.Elapsed.TotalMilliseconds / ambientTimer.Interval) + 2 && (systemMotion ? visibleAmbientFrames >= 4 : visibleAmbientFrames == 0),
+            "visible smooth background motion produces several real frames without exceeding its bounded scheduling rate");
+        double frozenPhase = (double)typeof(MainForm).GetField("_ambientPhase", flags)!.GetValue(form)!;
+        Call("ConfigureAmbientBackground", false); PumpFor(100);
+        Check((double)typeof(MainForm).GetField("_ambientPhase", flags)!.GetValue(form)! == frozenPhase,
+            "switching background motion off freezes its current position without a visual jump");
+        Call("ConfigureAmbientBackground", true);
+        Check((double)typeof(MainForm).GetField("_ambientPhase", flags)!.GetValue(form)! == frozenPhase,
+            "switching background motion back on resumes from the frozen position instead of restarting its loop");
         int captureStarts = controller.StartRequests, captureStops = controller.StopRequests;
         controller.Recording = true; Call("RefreshDashboard");
         ambientFrames = AmbientFrames(); PumpFor(160);
@@ -764,10 +1027,19 @@ internal static class Program
             lifetimeForm.StartPosition = FormStartPosition.Manual; lifetimeForm.Location = new Point(-20000, -20000);
             lifetimeForm.Show(); Application.DoEvents();
             var lifetimeTimer = (System.Windows.Forms.Timer)typeof(MainForm).GetField("_ambientTimer", flags)!.GetValue(lifetimeForm)!;
+            typeof(MainForm).GetMethod("BeginPageTransition", flags)!.Invoke(lifetimeForm, null);
+            var lifetimePageTimer = (System.Windows.Forms.Timer)typeof(MainForm).GetField("_pageMotionTimer", flags)!.GetValue(lifetimeForm)!;
+            var lifetimeOverlay = typeof(MainForm).GetField("_pageTransition", flags)!.GetValue(lifetimeForm) as Control;
+            var lifetimeButton = ((Button[])typeof(MainForm).GetField("_nav", flags)!.GetValue(lifetimeForm)!)[0];
+            lifetimeButton.GetType().GetMethod("OnMouseEnter", flags)!.Invoke(lifetimeButton, [EventArgs.Empty]);
             lifetimeForm.Dispose();
             int stoppedFrames = (int)typeof(MainForm).GetField("_ambientFrameCount", flags)!.GetValue(lifetimeForm)!;
             PumpFor(160);
             Check(lifetimeForm.IsDisposed && !lifetimeTimer.Enabled && (int)typeof(MainForm).GetField("_ambientFrameCount", flags)!.GetValue(lifetimeForm)! == stoppedFrames, "disposing the form detaches ambient scheduling and leaves no delayed frames");
+            Check(!lifetimePageTimer.Enabled && (lifetimeOverlay is null || lifetimeOverlay.IsDisposed) && typeof(MainForm).GetField("_pageTransition", flags)!.GetValue(lifetimeForm) is null,
+                "disposing the form also releases an active page snapshot and its animation timer");
+            Check(typeof(MainForm).GetField("_transitionInputFilter", flags)!.GetValue(lifetimeForm) is null && !(bool)lifetimeButton.GetType().GetProperty("AnimationRunning")!.GetValue(lifetimeButton)!,
+                "disposing removes the animation input filter and button timers from the application message loop");
         }
         HoverEvent("OnMouseLeave");
         Call("SetMotionEnabled", false);
