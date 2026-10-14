@@ -121,6 +121,7 @@ Sync("Applying a capture profile preserves storage and automation settings", () 
     current.RetentionDays = 20; current.MaxStorageGb = 77; current.AutoStopMinutes = 30;
     current.StartWithWindows = true; current.RecordOnLaunch = true; current.GameDetectionEnabled = true;
     current.GameExecutables = ["other.exe"];
+    current.AnimatedBackground = false;
     var capture = Settings(); capture.Fps = 30; capture.VideoBitrateKbps = 6000; capture.DisplayId = "display";
     capture.AudioDeviceId = "headset"; capture.SingleFile = false; capture.SegmentMinutes = 15;
     capture.MicrophoneEnabled = true; capture.MicrophoneDeviceId = "mic"; capture.MicrophoneGainPercent = 150; capture.SystemGainPercent = 60;
@@ -129,7 +130,7 @@ Sync("Applying a capture profile preserves storage and automation settings", () 
         && result.MicrophoneEnabled && result.MicrophoneGainPercent == 150 && result.SystemGainPercent == 60 && !result.SingleFile && result.SegmentMinutes == 15, "Capture fields must apply.");
     Require(result.RecordingDirectory == current.RecordingDirectory && result.RetentionDays == 20 && result.MaxStorageGb == 77
         && result.StartWithWindows && result.RecordOnLaunch && result.AutoStopMinutes == 30 && result.GameDetectionEnabled
-        && result.GameExecutables.SequenceEqual(["other.exe"]), "A preset must never replace storage or automation.");
+        && result.GameExecutables.SequenceEqual(["other.exe"]) && !result.AnimatedBackground, "A preset must never replace storage, automation or appearance preferences.");
     result.GameExecutables.Add("extra.exe");
     Require(current.GameExecutables.Count == 1, "Applying must deep-clone mutable settings.");
 });

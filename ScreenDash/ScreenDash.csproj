@@ -8,7 +8,7 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets/screendash.ico</ApplicationIcon>
     <AssemblyName>ScreenDash</AssemblyName>
-    <Version>1.5.1</Version>
+    <Version>1.6.0</Version>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <Company>ScreenDash</Company>
     <Description>Lokale Bildschirm-Dashcam für Windows</Description>

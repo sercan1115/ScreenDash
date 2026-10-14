@@ -22,6 +22,7 @@ public sealed class AppSettings
     public int ProtectMinutes { get; set; } = 10;
     public bool ShowNotifications { get; set; } = true;
     public bool MinimizeOnRecord { get; set; }
+    public bool AnimatedBackground { get; set; } = true;
     public int AutoStopMinutes { get; set; }
     public bool MicrophoneEnabled { get; set; }
     public string MicrophoneDeviceId { get; set; } = "";

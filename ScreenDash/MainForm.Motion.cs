@@ -6,6 +6,7 @@ public sealed partial class MainForm
 {
     private readonly System.Windows.Forms.Timer _pageMotionTimer = new() { Interval = 32 };
     private bool _motionEnabled = SystemInformation.IsMenuAnimationEnabled && !SystemInformation.HighContrast;
+    private bool _motionRequested = true;
     private long _motionStarted;
     private int _motionFrameCount;
     private bool _motionDisposed;
@@ -21,8 +22,9 @@ public sealed partial class MainForm
         };
         VisibleChanged += MotionVisibilityChanged;
         Resize += MotionVisibilityChanged;
+        InitializeAmbient();
     }
-    private void SetMotionEnabled(bool enabled) { _motionEnabled = enabled; if (!enabled) { CompletePageTransition(); FinishButtonMotion(this); } }
+    private void SetMotionEnabled(bool enabled) { _motionRequested = enabled; RefreshMotionPolicy(); }
     private void BeginPageTransition()
     {
         CompletePageTransition();
@@ -37,6 +39,7 @@ public sealed partial class MainForm
     }
     private void MotionVisibilityChanged(object? sender, EventArgs e)
     {
+        RefreshAmbientMotion();
         if (Visible && WindowState != FormWindowState.Minimized) return;
         CompletePageTransition();
         FinishButtonMotion(this);
@@ -45,5 +48,5 @@ public sealed partial class MainForm
     {
         foreach (Control child in parent.Controls) { if (child is ThemeButton button) button.FinishAnimation(); if (child.HasChildren) FinishButtonMotion(child); }
     }
-    private void DisposeMotion() { if (_motionDisposed) return; VisibleChanged -= MotionVisibilityChanged; Resize -= MotionVisibilityChanged; CompletePageTransition(); _pageMotionTimer.Dispose(); _motionDisposed = true; }
+    private void DisposeMotion() { if (_motionDisposed) return; DisposeAmbient(); VisibleChanged -= MotionVisibilityChanged; Resize -= MotionVisibilityChanged; CompletePageTransition(); _pageMotionTimer.Dispose(); _motionDisposed = true; }
 }

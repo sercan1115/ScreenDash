@@ -284,10 +284,11 @@ static void SettingsRoundtrip()
     input.ShowNotifications = false;
     input.MinimizeOnRecord = true;
     input.Fps = 27;
+    input.AnimatedBackground = false;
     SettingsStore.Save(input, file);
     var restored = SettingsStore.Load(file);
     Check(restored.RecordingDirectory == input.RecordingDirectory && restored.EncoderMode == "NVIDIA" && restored.RecordOnLaunch, "Saved choices should survive roundtrip.");
-    Check(!restored.ShowNotifications && restored.MinimizeOnRecord && restored.Fps == 27, "Notification/minimize preferences and custom FPS must survive validation and roundtrip.");
+    Check(!restored.ShowNotifications && restored.MinimizeOnRecord && restored.Fps == 27 && !restored.AnimatedBackground, "Notification/minimize/motion preferences and custom FPS must survive validation and roundtrip.");
     input.RetentionDays = 9;
     SettingsStore.Save(input, file);
     Check(SettingsStore.Load(file).RetentionDays == 9 && !Directory.EnumerateFiles(temp.Root, "*.tmp").Any(), "Replacement should finish atomically without leftover temporary files.");
@@ -298,7 +299,7 @@ static void SettingsRoundtrip()
     Check(File.ReadAllText(backup) == "{corrupt:json", "The corrupt original must remain recoverable.");
     File.WriteAllText(file, "{\"RecordingDirectory\":\"" + temp.Root.Replace("\\", "\\\\") + "\"}");
     var migrated = SettingsStore.Load(file);
-    Check(migrated.ShowNotifications && !migrated.MinimizeOnRecord, "Existing settings without new preferences should keep their natural defaults.");
+    Check(migrated.ShowNotifications && !migrated.MinimizeOnRecord && migrated.AnimatedBackground, "Existing settings without new preferences should keep their natural defaults.");
 }
 
 static void LabelRoundtrip()

@@ -20,19 +20,42 @@ public sealed partial class MainForm
             button.Click += (_, _) => ShowPage(page); _nav[page] = button; nav.Controls.Add(button);
         }
         sideGrid.Controls.Add(nav, 0, 1);
+        var sidebarArt = AmbientDecoration(Sidebar, true); sidebarArt.Dock = DockStyle.Fill; sidebarArt.Margin = new Padding(0, 3, 0, 13); sideGrid.Controls.Add(sidebarArt, 0, 2);
         var bottom = Grid(1, 4); bottom.RowStyles.Add(new RowStyle(SizeType.Absolute, 37)); bottom.RowStyles.Add(new RowStyle(SizeType.Absolute, 37)); bottom.RowStyles.Add(new RowStyle(SizeType.Absolute, 42)); bottom.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         var folder = SidebarAction("Ordner öffnen", AppGlyph.Folder); folder.Click += (_, _) => RunSync(_controller.OpenRecordingFolder); bottom.Controls.Add(folder, 0, 0);
         var logs = SidebarAction("Diagnose", AppGlyph.Activity); logs.Click += (_, _) => RunSync(_controller.OpenLogs); bottom.Controls.Add(logs, 0, 1);
-        var privacy = new StatusPill { Text = "LOKAL GESPEICHERT", ForeColor = Cyan, Font = new Font("Segoe UI", 7.4f, FontStyle.Bold), Dock = DockStyle.Fill, Margin = new Padding(0, 5, 0, 7) }; bottom.Controls.Add(privacy, 0, 2); bottom.Controls.Add(TextLabel("Version 1.5.1  ·  Windows", 8, Muted), 0, 3); sideGrid.Controls.Add(bottom, 0, 3); shell.Controls.Add(sidebar, 0, 0);
-        var main = Grid(1, 3); main.Padding = new Padding(28, 23, 28, 12); main.RowStyles.Add(new RowStyle(SizeType.Absolute, 84)); main.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); main.RowStyles.Add(new RowStyle(SizeType.Absolute, 29));
+        var privacy = new StatusPill { Text = "LOKAL GESPEICHERT", ForeColor = Cyan, Font = new Font("Segoe UI", 7.4f, FontStyle.Bold), Dock = DockStyle.Fill, Margin = new Padding(0, 5, 0, 7) }; bottom.Controls.Add(privacy, 0, 2); bottom.Controls.Add(TextLabel("Version 1.6.0  ·  Windows", 8, Muted), 0, 3); sideGrid.Controls.Add(bottom, 0, 3); shell.Controls.Add(sidebar, 0, 0);
+        var mainFrame = new Panel { Dock = DockStyle.Fill, BackColor = Canvas, Padding = new Padding(28, 23, 28, 12), Margin = Padding.Empty };
+        var main = Grid(1, 3); main.BackColor = Canvas; main.RowStyles.Add(new RowStyle(SizeType.Absolute, 84)); main.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); main.RowStyles.Add(new RowStyle(SizeType.Absolute, 29)); mainFrame.Controls.Add(main);
+        var leftArt = AmbientDecoration(Canvas, false); var rightArt = AmbientDecoration(Canvas, false); var topArt = AmbientDecoration(Canvas, false); var bottomArt = AmbientDecoration(Canvas, false);
+        mainFrame.Controls.AddRange([leftArt, rightArt, topArt, bottomArt]);
+        void LayoutAmbientFrame()
+        {
+            int width = mainFrame.ClientSize.Width, height = mainFrame.ClientSize.Height;
+            var padding = mainFrame.Padding;
+            int left = Math.Min(width, padding.Left), right = Math.Min(Math.Max(0, width - left), padding.Right);
+            int top = Math.Min(height, padding.Top), bottomHeight = Math.Min(Math.Max(0, height - top), padding.Bottom);
+            leftArt.SetBounds(0, 0, left, height); rightArt.SetBounds(width - right, 0, right, height);
+            topArt.SetBounds(left, 0, Math.Max(0, width - left - right), top); bottomArt.SetBounds(left, height - bottomHeight, Math.Max(0, width - left - right), bottomHeight);
+            foreach (var art in new[] { leftArt, rightArt, topArt, bottomArt }) { art.CanvasOrigin = art.Location; art.CanvasSize = mainFrame.ClientSize; }
+        }
+        mainFrame.SizeChanged += (_, _) => LayoutAmbientFrame(); mainFrame.PaddingChanged += (_, _) => LayoutAmbientFrame(); LayoutAmbientFrame();
         var headerSurface = new EditorialHeader { Dock = DockStyle.Fill, BackColor = Canvas, Margin = new Padding(0, 0, 0, 10) };
-        var header = Grid(2, 2); header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 184)); header.RowStyles.Add(new RowStyle(SizeType.Absolute, 47)); header.RowStyles.Add(new RowStyle(SizeType.Absolute, 26));
+        var header = Grid(3, 2); header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 104)); header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 184)); header.RowStyles.Add(new RowStyle(SizeType.Absolute, 47)); header.RowStyles.Add(new RowStyle(SizeType.Absolute, 26));
         _pageTitle.Font = new Font("Georgia", 29.5f, FontStyle.Italic); _pageTitle.ForeColor = Cyan;
         _pageSubtitle.Font = new Font("Segoe UI", 9.5f); _pageSubtitle.TextAlign = ContentAlignment.TopLeft;
         _headerState.Margin = new Padding(0, 7, 0, 7);
-        header.Controls.Add(_pageTitle, 0, 0); header.Controls.Add(_pageSubtitle, 0, 1); header.Controls.Add(_headerState, 1, 0); var keys = TextLabel("Strg + Alt + F8  ·  Start / Stopp", 8, Muted); keys.TextAlign = ContentAlignment.MiddleRight; header.Controls.Add(keys, 1, 1);
+        header.Controls.Add(_pageTitle, 0, 0); header.Controls.Add(_pageSubtitle, 0, 1); header.Controls.Add(_headerState, 2, 0); var keys = TextLabel("Strg + Alt + F8  ·  Start / Stopp", 8, Muted); keys.TextAlign = ContentAlignment.MiddleRight; header.Controls.Add(keys, 2, 1);
+        var headerArt = AmbientDecoration(Canvas, true); headerArt.Dock = DockStyle.Fill; headerArt.Margin = new Padding(10, 0, 12, 1); header.Controls.Add(headerArt, 1, 0); header.SetRowSpan(headerArt, 2);
+        header.SizeChanged += (_, _) =>
+        {
+            bool showArt = header.ClientSize.Width >= 800 * DeviceDpi / 96;
+            headerArt.Visible = showArt;
+            float width = showArt ? 104 * DeviceDpi / 96f : 0;
+            if (header.ColumnStyles[1].Width != width) header.ColumnStyles[1].Width = width;
+        };
         headerSurface.Controls.Add(header);
-        _footer.Text = "Deine Videos bleiben auf diesem PC."; _footer.Font = new Font("Segoe UI", 8.5f); main.Controls.Add(headerSurface, 0, 0); main.Controls.Add(_content, 0, 1); main.Controls.Add(_footer, 0, 2); shell.Controls.Add(main, 1, 0);
+        _footer.Text = "Deine Videos bleiben auf diesem PC."; _footer.Font = new Font("Segoe UI", 8.5f); main.Controls.Add(headerSurface, 0, 0); main.Controls.Add(_content, 0, 1); main.Controls.Add(_footer, 0, 2); shell.Controls.Add(mainFrame, 1, 0);
     }
     private static ThemeButton SidebarAction(string text, AppGlyph glyph)
     {

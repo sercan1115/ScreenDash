@@ -1,6 +1,9 @@
 using System.Drawing.Imaging;
+using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text.Json;
 using ScreenDash;
 
 internal static class Program
@@ -25,7 +28,7 @@ internal static class Program
         using var controller = new PreviewController();
         using var form = new MainForm(controller, enableHotkeys: false);
         form.Icon = previewIcon;
-        form.Text = "ScreenDash 1.5.1 · Vorschau mit Beispieldaten";
+        form.Text = "ScreenDash 1.6.0 · Vorschau mit Beispieldaten";
         form.StartPosition = FormStartPosition.Manual;
         form.Location = new Point(-20000, -20000);
         form.ClientSize = new Size(1180, 780);
@@ -33,6 +36,18 @@ internal static class Program
         ApplyPreviewDpi(form, dpi);
         SetLogicalClientSize(form, new Size(1180, 780));
         Console.WriteLine($"Preview DPI applied: {form.DeviceDpi}; requested: {dpi}. DPI events are simulated on this off-screen window.");
+        if (args.Contains("--ambient-frames", StringComparer.Ordinal))
+        {
+            RenderAmbientFrames(form, controller, output, args.Contains("--ambient-full-cycle", StringComparer.Ordinal)); return;
+        }
+        if (args.Contains("--ambient-benchmark", StringComparer.Ordinal))
+        {
+            RunAmbientBenchmark(form, controller, output); return;
+        }
+        if (args.Contains("--ambient-paint-benchmark", StringComparer.Ordinal))
+        {
+            RunAmbientBenchmark(form, controller, output, directPaintOnly: true); return;
+        }
         if (args.Contains("--checks-only", StringComparer.Ordinal))
         {
             SetLogicalClientSize(form, new Size(1024, 720)); RunUiChecks(form, controller); return;
@@ -147,7 +162,14 @@ internal static class Program
         if (form is MainForm) typeof(MainForm).GetMethod("CompletePageTransition", BindingFlags.NonPublic | BindingFlags.Instance)?.Invoke(form, null);
         LayoutTree(form); Application.DoEvents();
         bool clientOnly = _clientOnlySnapshots || form.DeviceDpi != 96;
-        using var bitmap = new Bitmap(clientOnly ? form.ClientSize.Width : form.Width, clientOnly ? form.ClientSize.Height : form.Height);
+        using var bitmap = CaptureBitmap(form, clientOnly);
+        bitmap.Save(file, ImageFormat.Png);
+        Console.WriteLine(file);
+    }
+
+    private static Bitmap CaptureBitmap(Form form, bool clientOnly)
+    {
+        var bitmap = new Bitmap(clientOnly ? form.ClientSize.Width : form.Width, clientOnly ? form.ClientSize.Height : form.Height);
         if (clientOnly)
         {
             // Draw the native client tree directly without window chrome. Simulated DPI events
@@ -156,8 +178,119 @@ internal static class Program
             foreach (Control control in form.Controls.Cast<Control>().Reverse()) control.DrawToBitmap(bitmap, control.Bounds);
         }
         else form.DrawToBitmap(bitmap, new Rectangle(Point.Empty, form.Size));
-        bitmap.Save(file, ImageFormat.Png);
-        Console.WriteLine(file);
+        return bitmap;
+    }
+
+    private static void PumpMessages(int milliseconds)
+    {
+        var elapsed = Stopwatch.StartNew();
+        while (elapsed.ElapsedMilliseconds < milliseconds) { Application.DoEvents(); Thread.Sleep(5); }
+    }
+
+    private static object? MainFormCall(MainForm form, string name, params object[] args) =>
+        typeof(MainForm).GetMethod(name, BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(form, args);
+
+    private static void RenderAmbientFrames(MainForm form, PreviewController controller, string output, bool fullCycle)
+    {
+        // These are native vector renders of fake recording data, never a capture of the user's desktop.
+        _clientOnlySnapshots = true;
+        controller.Recording = true;
+        MainFormCall(form, "RefreshDashboard"); MainFormCall(form, "ShowPage", 0);
+        MainFormCall(form, "CompletePageTransition"); MainFormCall(form, "ConfigureAmbientBackground", false);
+        const int framesPerSecond = 10;
+        const double nativePeriodSeconds = 36;
+        int frameCount = fullCycle ? framesPerSecond * (int)nativePeriodSeconds : 120;
+        for (int frame = 0; frame < frameCount; frame++)
+        {
+            MainFormCall(form, "SetAmbientPreviewPhase", frame * Math.Tau / (framesPerSecond * nativePeriodSeconds));
+            SaveSnapshot(form, Path.Combine(output, $"Frame-{frame:000}.png"));
+        }
+        File.WriteAllText(Path.Combine(output, "Ambient-Frames.json"), JsonSerializer.Serialize(new
+        {
+            Frames = frameCount, FramesPerSecond = framesPerSecond, DurationSeconds = frameCount / framesPerSecond,
+            NativePeriodSeconds = nativePeriodSeconds, FullCycle = fullCycle, SyntheticRecordingData = true
+        }, new JsonSerializerOptions { WriteIndented = true }));
+        Console.WriteLine($"Ambient sequence: {frameCount} native client frames at {framesPerSecond} FPS; {frameCount / framesPerSecond} seconds of real-speed motion; full cycle: {fullCycle}; synthetic recording data.");
+    }
+
+    private static void RunAmbientBenchmark(MainForm form, PreviewController controller, string output, bool directPaintOnly = false)
+    {
+        MainFormCall(form, "ShowPage", 0); MainFormCall(form, "CompletePageTransition");
+        controller.Recording = false; MainFormCall(form, "RefreshDashboard");
+        using var process = Process.GetCurrentProcess();
+        var surfaces = ((System.Collections.IEnumerable)typeof(MainForm).GetField("_ambientSurfaces", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(form)!).Cast<Control>()
+            .Where(control => control.Visible && control.ClientSize.Width > 0 && control.ClientSize.Height > 0).ToArray();
+        var paintBuffers = surfaces.Select(control => new Bitmap(control.ClientSize.Width, control.ClientSize.Height)).ToArray();
+        long backgroundPixelArea = surfaces.Sum(control => (long)control.ClientSize.Width * control.ClientSize.Height);
+        var paintGraphics = directPaintOnly ? paintBuffers.Select(Graphics.FromImage).ToArray() : [];
+        var paintEvents = directPaintOnly ? surfaces.Select((control, index) => new PaintEventArgs(paintGraphics[index], control.ClientRectangle)).ToArray() : [];
+        var paintMethods = directPaintOnly ? surfaces.Select(control => control.GetType().GetMethod("OnPaint", BindingFlags.Instance | BindingFlags.NonPublic)!).ToArray() : [];
+        var paintArguments = paintEvents.Select(paintEvent => new object[] { paintEvent }).ToArray();
+        void PaintAmbientSurfaces()
+        {
+            // An off-screen native window may be clipped by Windows. Force only the small ambient
+            // surfaces through WinForms' native paint path so measured drawing cost is included.
+            for (int surface = 0; surface < surfaces.Length; surface++)
+                if (surfaces[surface].ClientSize.Width > 0 && surfaces[surface].ClientSize.Height > 0)
+                {
+                    if (directPaintOnly) paintMethods[surface].Invoke(surfaces[surface], paintArguments[surface]);
+                    else surfaces[surface].DrawToBitmap(paintBuffers[surface], surfaces[surface].ClientRectangle);
+                }
+        }
+        int Frames() => (int)typeof(MainForm).GetField("_ambientFrameCount", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(form)!;
+        object Measure(string state, bool enabled, bool minimized)
+        {
+            MainFormCall(form, "ConfigureAmbientBackground", enabled);
+            form.WindowState = minimized ? FormWindowState.Minimized : FormWindowState.Normal;
+            PumpMessages(250);
+            if (!minimized) PaintAmbientSurfaces();
+            int initialFrames = Frames();
+            int initialGdi = GetGuiResources(process.Handle, 0);
+            var cpuStarted = process.TotalProcessorTime;
+            var elapsed = Stopwatch.StartNew();
+            int lastRenderedFrame = initialFrames, renderedFrames = 0;
+            while (elapsed.ElapsedMilliseconds < 4000)
+            {
+                Application.DoEvents();
+                int currentFrame = Frames();
+                if (currentFrame != lastRenderedFrame)
+                {
+                    PaintAmbientSurfaces(); renderedFrames++; lastRenderedFrame = currentFrame;
+                }
+                Thread.Sleep(5);
+            }
+            elapsed.Stop();
+            double cpuMilliseconds = (process.TotalProcessorTime - cpuStarted).TotalMilliseconds;
+            return new
+            {
+                State = state, ElapsedMilliseconds = Math.Round(elapsed.Elapsed.TotalMilliseconds, 2),
+                CpuMilliseconds = Math.Round(cpuMilliseconds, 2),
+                CpuPercentOfOneCore = Math.Round(cpuMilliseconds / elapsed.Elapsed.TotalMilliseconds * 100, 3),
+                CpuPercentOfMachine = Math.Round(cpuMilliseconds / elapsed.Elapsed.TotalMilliseconds / Environment.ProcessorCount * 100, 3),
+                BackgroundFrames = Frames() - initialFrames, ForcedBackgroundRenders = renderedFrames,
+                GdiHandleChange = GetGuiResources(process.Handle, 0) - initialGdi
+            };
+        }
+        var samples = new[] { Measure("visible-background-off", false, false), Measure("visible-background-on", true, false), Measure("minimized-background-on", true, true) };
+        var report = new
+        {
+            Method = directPaintOnly ? "production-OnPaint-direct" : "native-DrawToBitmap",
+            Description = directPaintOnly
+                ? "Synthetic off-screen idle benchmark invoking the real AmbientPanel.OnPaint method on persistent Graphics and Bitmap buffers. MethodInfo, PaintEventArgs and argument arrays are cached. Includes native GDI+ clear, pens and curves, excludes WinForms double-buffer blits, WM_PRINT and DrawToBitmap copies. No screen or audio recording and no game workload. This drawing-only sample is not an estimate of gaming performance."
+                : "Synthetic off-screen WinForms idle benchmark with bounded ambient surfaces forced through DrawToBitmap on each background frame. Includes WM_PRINT and bitmap copying overhead; no full UI repaint, no screen or audio recording and no game workload. This is not an estimate of gaming performance.",
+            LogicalProcessors = Environment.ProcessorCount, Dpi = form.DeviceDpi,
+            BackgroundSurfaceCount = surfaces.Length, BackgroundPixelArea = backgroundPixelArea,
+            WindowsAnimationEnabled = WindowsMotionEnabled(),
+            Samples = samples
+        };
+        string json = JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true });
+        File.WriteAllText(Path.Combine(output, directPaintOnly ? "Ambient-Paint-Benchmark.json" : "Ambient-Benchmark.json"), json);
+        Console.WriteLine(json);
+        form.WindowState = FormWindowState.Normal;
+        MainFormCall(form, "ConfigureAmbientBackground", false);
+        foreach (var paintEvent in paintEvents) paintEvent.Dispose();
+        foreach (var graphics in paintGraphics) graphics.Dispose();
+        foreach (var bitmap in paintBuffers) bitmap.Dispose();
     }
 
     private static void ApplyPreviewDpi(Form form, int dpi)
@@ -212,6 +345,14 @@ internal static class Program
     private struct NativeRect { public int Left, Top, Right, Bottom; }
     [DllImport("user32.dll")]
     private static extern nint SendMessage(nint window, uint message, nint wParam, nint lParam);
+    [DllImport("user32.dll")]
+    private static extern int GetGuiResources(nint process, uint flags);
+    [DllImport("user32.dll", EntryPoint = "SystemParametersInfoW")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SystemParametersInfo(uint action, uint parameter, out int enabled, uint flags);
+
+    private static bool WindowsMotionEnabled() => !SystemInformation.HighContrast && SystemInformation.IsMenuAnimationEnabled &&
+        (!SystemParametersInfo(0x1042, 0, out int clientAnimation, 0) || clientAnimation != 0);
 
     private static void RunUiChecks(MainForm form, PreviewController controller)
     {
@@ -469,7 +610,7 @@ internal static class Program
         Call("ShowPage", 2); controller.ArchiveOverride = Enumerable.Range(0, 750).Select(i => new RecordingInfo($"record-{i:0000}.mkv", DateTime.UtcNow.AddMinutes(-i), i * 1024L, false, false)).ToArray(); Call("RefreshRecordings", true); var target = controller.ArchiveOverride[605]; Call("SelectArchiveRecording", target);
         Check(Field<Label>("_archivePageLabel").Text.StartsWith("Seite 4") && grid.SelectedRows.Count == 1 && ((RecordingInfo)grid.SelectedRows[0].Tag!).Path == target.Path, "time search can reveal and select a match beyond the first archive page");
         Check(Field<Button>("_bookmarksSelected").Enabled, "single archive selection exposes saved moments");
-        // Native control animations must stop promptly and never turn idle screens into a render loop.
+        // Navigation and hover remain finite; the separately configured ambient layer has its own bounded timer.
         Call("SetMotionEnabled", true); Call("CompletePageTransition");
         var pageTimer = Field<System.Windows.Forms.Timer>("_pageMotionTimer");
         int MotionFrames() => (int)typeof(MainForm).GetField("_motionFrameCount", flags)!.GetValue(form)!;
@@ -480,7 +621,7 @@ internal static class Program
         }
         Check(!pageTimer.Enabled && Field<Panel>("_content").Padding == Padding.Empty, "settled UI has no page animation timer or residual offset");
         int frames = MotionFrames(); Call("BeginPageTransition");
-        bool systemMotion = SystemInformation.IsMenuAnimationEnabled && !SystemInformation.HighContrast;
+        bool systemMotion = WindowsMotionEnabled();
         Check(pageTimer.Enabled == systemMotion, "visible page transitions respect the Windows animation and high contrast preferences");
         PumpFor(350);
         Check(!pageTimer.Enabled && (systemMotion ? MotionFrames() > frames : MotionFrames() == frames) && Field<Panel>("_content").Padding == Padding.Empty, "page transition completes and removes its temporary offset");
@@ -558,6 +699,75 @@ internal static class Program
             Check(startupForm.Visible && startupForm.ShowInTaskbar && startupForm.WindowState == FormWindowState.Minimized, "explicit minimized startup creates a taskbar window instead of a hidden tray-only window");
             typeof(MainForm).GetMethod("ShowWindow", flags)!.Invoke(startupForm, null); Application.DoEvents();
             Check(startupForm.Visible && startupForm.ShowInTaskbar && startupForm.WindowState == FormWindowState.Normal && startupController.StartRequests == 0 && startupController.StopRequests == 0, "restoring an explicitly minimized startup leaves capture idle and creates no start or stop requests");
+        }
+        Call("ShowPage", 0); Call("CompletePageTransition"); Call("SetMotionEnabled", true); Call("LoadSettings");
+        var ambientChoice = Field<CheckBox>("_animatedBackground");
+        var ambientTimer = Field<System.Windows.Forms.Timer>("_ambientTimer");
+        int AmbientFrames() => (int)typeof(MainForm).GetField("_ambientFrameCount", flags)!.GetValue(form)!;
+        Check(new AppSettings().AnimatedBackground && ambientChoice.Checked && ((AppSettings)Call("ReadSettings")!).AnimatedBackground, "fresh and existing settings keep the moving background enabled by default");
+        Check(!string.IsNullOrWhiteSpace(ambientChoice.AccessibleName), "the background preference has an accessible user-facing label");
+        Check(ambientTimer.Interval >= 67, "background scheduling is capped below fifteen frames per second");
+        ambientChoice.Checked = false;
+        Check(!((AppSettings)Call("ReadSettings")!).AnimatedBackground && !ambientTimer.Enabled, "switching the background off immediately stops its timer and becomes a settings draft");
+        var ambientSaveTask = (Task)Call("SaveSettingsAsync")!; PumpFor(30);
+        Check(ambientSaveTask.IsCompletedSuccessfully && !controller.Settings.AnimatedBackground, "saving the motion preference commits it to the synthetic controller");
+        Call("LoadSettings");
+        Check(!ambientChoice.Checked && !ambientTimer.Enabled, "reloading the saved off preference leaves the background still");
+        ambientChoice.Checked = true;
+        ambientSaveTask = (Task)Call("SaveSettingsAsync")!; PumpFor(30); Call("LoadSettings");
+        Check(ambientSaveTask.IsCompletedSuccessfully && controller.Settings.AnimatedBackground && ambientChoice.Checked && ambientTimer.Enabled == systemMotion, "saved background motion resumes only when Windows allows animation");
+        int ambientFrames = AmbientFrames(); PumpFor(360);
+        Check(systemMotion ? AmbientFrames() > ambientFrames : AmbientFrames() == ambientFrames, "visible enabled backgrounds advance frames while reduced motion keeps them still");
+        int captureStarts = controller.StartRequests, captureStops = controller.StopRequests;
+        controller.Recording = true; Call("RefreshDashboard");
+        ambientFrames = AmbientFrames(); PumpFor(160);
+        Check(controller.Recording && controller.StartRequests == captureStarts && controller.StopRequests == captureStops && (systemMotion ? AmbientFrames() > ambientFrames : AmbientFrames() == ambientFrames), "background motion continues in a visible recording window without restarting or stopping capture");
+        var trayMotion = Field<ToolStripMenuItem>("_trayMotion");
+        trayMotion.PerformClick();
+        Check(!trayMotion.Checked && !ambientChoice.Checked && !ambientTimer.Enabled && controller.Settings.AnimatedBackground && controller.Recording && controller.StartRequests == captureStarts && controller.StopRequests == captureStops,
+            "tray motion can turn the background off during capture without changing the saved profile or recording state");
+        trayMotion.PerformClick();
+        Check(trayMotion.Checked && ambientChoice.Checked && ambientTimer.Enabled == systemMotion && controller.Settings.AnimatedBackground && controller.Recording,
+            "tray motion can restore the live background during capture while retaining the saved preference");
+        form.WindowState = FormWindowState.Minimized; Application.DoEvents(); ambientFrames = AmbientFrames(); PumpFor(180);
+        Check(!ambientTimer.Enabled && AmbientFrames() == ambientFrames && controller.Recording && controller.StopRequests == captureStops, "minimizing stops every ambient frame immediately and preserves capture");
+        Call("ShowWindow"); Application.DoEvents();
+        Check(ambientTimer.Enabled == systemMotion, "restoring resumes the configured background without an extra user action");
+        form.Hide(); Application.DoEvents(); ambientFrames = AmbientFrames(); PumpFor(180);
+        Check(!ambientTimer.Enabled && AmbientFrames() == ambientFrames, "hidden windows do not schedule ambient frames");
+        form.Show(); Application.DoEvents();
+        Check(ambientTimer.Enabled == systemMotion, "showing a hidden window restores the preferred background motion");
+        Call("SetMotionEnabled", false); ambientFrames = AmbientFrames(); PumpFor(180);
+        Check(!ambientTimer.Enabled && AmbientFrames() == ambientFrames, "the common reduced-motion switch also stops ambient motion");
+        Call("ConfigureAmbientBackground", false); Call("CompletePageTransition"); LayoutTree(form);
+        var actionBounds = new[] { "_toggle", "_pause", "_protect", "_bookmark" }.Select(Field<Button>).Select(button => button.Bounds).ToArray();
+        string PhaseHash(double phase)
+        {
+            Call("SetAmbientPreviewPhase", phase);
+            using var bitmap = CaptureBitmap(form, clientOnly: true);
+            using var bytes = new MemoryStream(); bitmap.Save(bytes, ImageFormat.Png);
+            return Convert.ToHexString(SHA256.HashData(bytes.GetBuffer().AsSpan(0, checked((int)bytes.Length))));
+        }
+        string firstPhase = PhaseHash(0), secondPhase = PhaseHash(Math.PI);
+        Check(SystemInformation.HighContrast ? firstPhase == secondPhase : firstPhase != secondPhase, "ambient phases visibly change the native client rendering while high contrast keeps the background still");
+        Check(actionBounds.SequenceEqual(new[] { "_toggle", "_pause", "_protect", "_bookmark" }.Select(Field<Button>).Select(button => button.Bounds)), "moving the background does not shift capture buttons or their hit targets");
+        using (var uiProcess = Process.GetCurrentProcess())
+        {
+            int gdiBefore = GetGuiResources(uiProcess.Handle, 0);
+            for (int phase = 0; phase < 16; phase++) PhaseHash(phase * Math.Tau / 16);
+            Check(GetGuiResources(uiProcess.Handle, 0) <= gdiBefore + 4, "repeated native background renders do not accumulate GDI drawing handles");
+        }
+        controller.Recording = false; Call("RefreshDashboard");
+        using (var lifetimeController = new PreviewController())
+        {
+            var lifetimeForm = new MainForm(lifetimeController, enableHotkeys: false);
+            lifetimeForm.StartPosition = FormStartPosition.Manual; lifetimeForm.Location = new Point(-20000, -20000);
+            lifetimeForm.Show(); Application.DoEvents();
+            var lifetimeTimer = (System.Windows.Forms.Timer)typeof(MainForm).GetField("_ambientTimer", flags)!.GetValue(lifetimeForm)!;
+            lifetimeForm.Dispose();
+            int stoppedFrames = (int)typeof(MainForm).GetField("_ambientFrameCount", flags)!.GetValue(lifetimeForm)!;
+            PumpFor(160);
+            Check(lifetimeForm.IsDisposed && !lifetimeTimer.Enabled && (int)typeof(MainForm).GetField("_ambientFrameCount", flags)!.GetValue(lifetimeForm)! == stoppedFrames, "disposing the form detaches ambient scheduling and leaves no delayed frames");
         }
         HoverEvent("OnMouseLeave");
         Call("SetMotionEnabled", false);

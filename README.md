@@ -2,16 +2,18 @@
 
 Eine lokale Bildschirm-Dashcam für **Windows 10/11 (64 Bit)**. ScreenDash zeichnet einen ausgewählten Monitor mit Systemton auf, speichert eine durchgehende Datei je Aufnahme und räumt alte Aufnahmen automatisch auf.
 
-**[Windows-Version herunterladen](https://github.com/sercan1115/ScreenDash/releases/latest)** · [Anleitung](README.de.md) · [Neuerungen in 1.5.1](NEU-IN-1.5.1.de.md)
+**[Windows-Version herunterladen](https://github.com/sercan1115/ScreenDash/releases/latest)** · [Anleitung](README.de.md) · [Neuerungen in 1.6.0](NEU-IN-1.6.0.de.md)
 
 ![ScreenDash – Aufnahmeübersicht mit Beispieldaten](docs/screenshots/dashboard.png)
 
 Die Bilder zeigen die Oberfläche mit Beispieldaten. Ihre Auslastungsanzeigen sind keine Messwerte.
 
+![Bewegter silberner Hintergrund – native Vorschau mit Beispieldaten](docs/screenshots/ambient.gif)
+
 ## Funktionen
 
 - **Fenster und Desktop-Symbol:** sichtbar starten, beim Minimieren in der Taskleiste bleiben und per Doppelklick wieder öffnen. Die eigene Desktop-Verknüpfung wird beim Start angelegt und nach einem Update angepasst.
-- **Schwarz und Silber:** dunkle Flächen, silberne Akzente, metallische Schaltflächen, nummerierte Bereiche und große Serifenschrift. Kurze Hover- und Seitenübergänge; Animationstimer ruhen im Leerlauf und bei minimiertem Fenster.
+- **Lebendiges Schwarz und Silber:** langsam wandernde silberne Konturen im Hintergrund, dunkle Karten, metallische Schaltflächen und große Serifenschrift. Die Hintergrundbewegung lässt sich abschalten und pausiert bei minimiertem oder verstecktem Fenster; Windows-Einstellungen für reduzierte Bewegung werden berücksichtigt.
 - **Klarere Bedienung:** korrekte Audio- und Encoderanzeigen, sichtbare offene Einstellungen, erklärte Archivaktionen und zugängliche Eingabefelder.
 - **Lesezeichen:** während der Aufnahme Momente markieren, die ganze Datei schützen und später Clips davor/danach exportieren.
 - **Spielerkennung:** bei ausgewählten Spielen automatisch starten/stoppen; manuelles Stoppen wird respektiert. Anfangs ausgeschaltet.
