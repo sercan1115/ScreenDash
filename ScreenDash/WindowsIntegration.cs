@@ -72,7 +72,7 @@ public static class WindowsIntegration
         string directory = Path.GetFullPath(desktopDirectory ?? Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory));
         RequireUnredirectedParents(directory);
         var attributes = File.GetAttributes(directory);
-        if ((attributes & FileAttributes.Directory) == 0 || (attributes & FileAttributes.ReparsePoint) != 0)
+        if ((attributes & FileAttributes.Directory) == 0 || IsUnsupportedReparsePoint(directory, attributes))
             throw new IOException("Der Desktopordner darf keine umgeleitete Verknüpfung sein.");
         return InSta(() => EnsureShortcutCore(target, directory));
     }
@@ -136,7 +136,7 @@ public static class WindowsIntegration
                 try
                 {
                     var attributes = AttributesOrMissing(temporary);
-                    if (attributes.HasValue && (attributes.Value & (FileAttributes.Directory | FileAttributes.ReparsePoint)) == 0)
+                    if (attributes.HasValue && (attributes.Value & FileAttributes.Directory) == 0 && !IsUnsupportedReparsePoint(temporary, attributes.Value))
                         File.Delete(temporary);
                 }
                 catch (IOException) { }
@@ -220,7 +220,7 @@ public static class WindowsIntegration
     {
         RequireUnredirectedParents(path);
         var attributes = File.GetAttributes(path);
-        if ((attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0)
+        if ((attributes & FileAttributes.Directory) != 0 || IsUnsupportedReparsePoint(path, attributes))
             throw new IOException("ScreenDash benötigt eine normale Datei ohne Umleitung.");
     }
 
@@ -239,7 +239,8 @@ public static class WindowsIntegration
             int error = Marshal.GetLastWin32Error(); handle.Dispose();
             throw new IOException("Die vorhandene Desktopverknüpfung kann nicht geprüft werden.", new Win32Exception(error));
         }
-        if ((info.Attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0)
+        if ((info.Attributes & FileAttributes.Directory) != 0 ||
+            ((info.Attributes & FileAttributes.ReparsePoint) != 0 && !IsCloudTag(info.ReparseTag)))
         {
             handle.Dispose();
             throw new IOException("Eine umgeleitete Desktopverknüpfung bleibt unverändert.");
@@ -252,10 +253,25 @@ public static class WindowsIntegration
         for (var parent = Directory.GetParent(path); parent is not null; parent = parent.Parent)
         {
             var attributes = File.GetAttributes(parent.FullName);
-            if ((attributes & FileAttributes.Directory) == 0 || (attributes & FileAttributes.ReparsePoint) != 0)
+            if ((attributes & FileAttributes.Directory) == 0 || IsUnsupportedReparsePoint(parent.FullName, attributes))
                 throw new IOException("Ein umgeleiteter Ordnerpfad bleibt unverändert.");
         }
     }
+
+    private static bool IsUnsupportedReparsePoint(string path, FileAttributes attributes)
+    {
+        if ((attributes & FileAttributes.ReparsePoint) == 0) return false;
+        // Query the object itself without following it. Cloud Files placeholders keep
+        // their own path; junctions, symbolic links and unknown reparse tags are refused.
+        using var handle = CreateFile(path, 0x80, 7, 0, 3, 0x02200000, 0);
+        if (handle.IsInvalid || !GetFileInformationByHandleEx(handle, 9, out var info, (uint)Marshal.SizeOf<FileAttributeTagInfo>()))
+            throw new IOException("Der Ordner- oder Dateipfad kann nicht geprüft werden.", new Win32Exception(Marshal.GetLastWin32Error()));
+        return !IsCloudTag(info.ReparseTag);
+    }
+
+    // MS-FSCC Cloud Files tags: CLOUD and CLOUD_1..CLOUD_F; legacy ONEDRIVE.
+    // https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fscc/c8e77b37-3909-4fe6-a4ea-2b9d423b1ee4
+    private static bool IsCloudTag(uint tag) => (tag & 0xFFFF0FFF) == 0x9000001A || tag == 0x80000021;
 
     private static FileAttributes? AttributesOrMissing(string path)
     {
