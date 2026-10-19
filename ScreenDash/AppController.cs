@@ -140,6 +140,7 @@ public sealed partial class AppController : IAppController
             if (_session.CanCapture)
             {
                 try { await StartCoreAsync(); }
+                catch (GameStartNoLongerEligibleException) { }
                 catch (OperationCanceledException) when (!_disposed) { HandleCanceledStart(); }
                 catch { if (_session.Armed) _session.Pause(); throw; }
             }
@@ -148,8 +149,9 @@ public sealed partial class AppController : IAppController
         finally { _gate.Release(); Publish(); }
     }
 
-    private async Task StartCoreAsync()
+    private async Task StartCoreAsync(Func<CancellationToken, Task>? beforeCapture = null)
     {
+        beforeCapture ??= PendingGameStartValidation();
         using var startup = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
         lock (_startupGate) _pendingStart = startup;
         _busy = true; _message = "Grafik-Encoder wird geprüft …"; Publish();
@@ -167,7 +169,7 @@ public sealed partial class AppController : IAppController
             if (!_session.CanCapture) throw new OperationCanceledException("Aufnahmestart unterbrochen.", startup.Token);
             if (!_storage.CanRecord) throw new InvalidOperationException(_storage.Message);
             _sessionPrefix = "screendash_" + DateTime.UtcNow.ToString("yyyyMMdd'T'HHmmssfff'Z'") + "_" + Guid.NewGuid().ToString("N")[..8];
-            await _recorder.StartAsync(_settings.Clone(), display, _sessionPrefix, startup.Token);
+            await _recorder.StartAsync(_settings.Clone(), display, _sessionPrefix, startup.Token, beforeCapture);
             startup.Token.ThrowIfCancellationRequested();
             if (!_session.CanCapture) throw new OperationCanceledException("Aufnahmestart unterbrochen.", startup.Token);
             if (!_recorder.Status.Recording) throw new IOException("Die Aufnahme wurde bereits beim Start unterbrochen. Prüfe das Protokoll und die Geräte.");
@@ -230,7 +232,7 @@ public sealed partial class AppController : IAppController
             _store = candidateStore;
             bool gamesChanged = _settings.GameDetectionEnabled != validated.GameDetectionEnabled || !_settings.GameExecutables.SequenceEqual(validated.GameExecutables);
             _settings = validated;
-            if (gamesChanged) lock (_gameGate) { _gameDetection.Reset(); _gameRecordingOwned = false; _gameExitCounter = null; }
+            if (gamesChanged) lock (_gameGate) { _gameDetection.Reset(); _gameRecordingOwned = false; _gameAwaitingFirstCapture = false; _gameExitCounter = null; }
             _session.SetPrivacy(_locked, _suspended, validated.PauseOnLock);
             SetStorage(await Task.Run(() => _store.Cleanup(validated, videoPeakBitrateKbps: StorageVideoPeak(validated))));
             _message = "Einstellungen gespeichert";
@@ -362,6 +364,7 @@ public sealed partial class AppController : IAppController
     {
         bool wasRecording = _recordStatus.Recording;
         _recordStatus = status;
+        if (status.Recording) lock (_gameGate) _gameAwaitingFirstCapture = false;
         if (status.Recording && !wasRecording) _recordingClock.Begin();
         if (!status.Recording && wasRecording)
         {
@@ -462,6 +465,7 @@ public sealed partial class AppController : IAppController
                 else if (_session.CanCapture && !_recordStatus.Recording && !_busy)
                 {
                     try { await StartCoreAsync(); }
+                    catch (GameStartNoLongerEligibleException) { }
                     catch (OperationCanceledException) when (!_disposed) { HandleCanceledStart(); }
                     catch (Exception ex) { SuppressGameRestart(); _session.Stop(); ShowNotice(ex.Message); }
                 }

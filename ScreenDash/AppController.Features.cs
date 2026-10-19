@@ -12,7 +12,7 @@ public sealed partial class AppController
     private readonly object _gameGate = new();
     private IReadOnlyList<AudioSource> _microphones = [];
     private Task? _gameTask;
-    private bool _gameRecordingOwned;
+    private bool _gameRecordingOwned, _gameAwaitingFirstCapture;
     private long? _gameExitCounter, _silentSinceCounter;
     private string _silenceWarning = "";
     private string _gameDetectionMessage = "Warte auf ein ausgewähltes Spiel im Vordergrund.";
@@ -128,8 +128,57 @@ public sealed partial class AppController
 
     private void SuppressGameRestart()
     {
-        lock (_gameGate) { _gameDetection.MarkRecordingStopped(); _gameDetection.SuppressUntilGamesExit(); _gameRecordingOwned = false; _gameExitCounter = null; }
+        lock (_gameGate) { _gameDetection.MarkRecordingStopped(); _gameDetection.SuppressUntilGamesExit(); _gameRecordingOwned = false; _gameAwaitingFirstCapture = false; _gameExitCounter = null; }
     }
+
+    private sealed class GameStartNoLongerEligibleException(string message) : OperationCanceledException(message);
+
+    private Func<CancellationToken, Task>? PendingGameStartValidation()
+    {
+        lock (_gameGate)
+        {
+            if (!_gameRecordingOwned || !_gameAwaitingFirstCapture) return null;
+            // A lock or manual pause may interrupt the very first probe. Resuming
+            // that intent is still an initial start until the recorder has frames.
+            var requestedSettings = _settings.Clone();
+            long stopRequest = Interlocked.Read(ref _stopRequests);
+            return ct => RevalidateGameStartAsync(requestedSettings, stopRequest, ct);
+        }
+    }
+
+    private async Task RevalidateGameStartAsync(AppSettings requestedSettings, long stopRequest, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        // Encoder probing can take several seconds. Recheck the live window only once,
+        // immediately before the initial automatic start opens any capture devices.
+        var result = await Task.Run(() => _gameDetection.Evaluate(requestedSettings.GameExecutables), ct).WaitAsync(ct);
+        ct.ThrowIfCancellationRequested();
+        lock (_gameGate)
+        {
+            // Stop and privacy/manual pause cancellation take precedence over this policy
+            // rejection, preserving their suppression and their normal resume behavior.
+            ct.ThrowIfCancellationRequested();
+            if (stopRequest != Interlocked.Read(ref _stopRequests) || !_session.CanCapture || !_gameRecordingOwned)
+                throw new OperationCanceledException("Aufnahmestart unterbrochen.", ct);
+
+            bool sameGames = _settings.GameDetectionEnabled
+                && requestedSettings.GameExecutables.SequenceEqual(_settings.GameExecutables);
+            if (sameGames && result.SnapshotReliable && result.HasForegroundGame) return;
+
+            _gameDetection.MarkRecordingStopped();
+            _gameRecordingOwned = false; _gameAwaitingFirstCapture = false; _gameExitCounter = null;
+            _session.Stop(); _recordingClock.End();
+            _gameDetectionMessage = !sameGames ? "Spielauswahl geändert · warte auf ein ausgewähltes Spiel im Vordergrund."
+                : !result.SnapshotReliable ? "Spielerkennung vorübergehend nicht verfügbar · warte vor dem Aufnahmestart auf ein bestätigtes Spielfenster."
+                : result.HasGames ? "Spielfenster nicht mehr im Vordergrund · warte vor dem Aufnahmestart auf das Spiel."
+                : "Spiel vor dem Aufnahmestart beendet · warte auf ein ausgewähltes Spiel im Vordergrund.";
+            _message = _gameDetectionMessage;
+            // This is no explicit Stop: foreground activation may qualify again at the
+            // next normal game check. Never route it through the privacy restart path.
+            throw new GameStartNoLongerEligibleException(_message);
+        }
+    }
+
     private async Task CheckGamesAsync()
     {
         try
@@ -152,14 +201,15 @@ public sealed partial class AppController
                         if (stopRequest != Interlocked.Read(ref _stopRequests)) return;
                         _session.Start(); _recordingClock.Reset();
                         // Ownership follows intent, including a startup paused by lock/standby.
-                        _gameDetection.MarkRecordingStarted(); _gameRecordingOwned = true;
+                        _gameDetection.MarkRecordingStarted(); _gameRecordingOwned = true; _gameAwaitingFirstCapture = true;
                     }
                     if (stopRequest != Interlocked.Read(ref _stopRequests)) { _session.Stop(); SuppressGameRestart(); return; }
                     try
                     {
-                        await StartCoreAsync();
+                        await StartCoreAsync(ct => RevalidateGameStartAsync(settings, stopRequest, ct));
                         if (_recordStatus.Recording) { _message = "Spiel erkannt · " + string.Join(", ", result.RunningGames); ShowNotice(_message); }
                     }
+                    catch (GameStartNoLongerEligibleException) { }
                     catch (OperationCanceledException) when (!_disposed) { HandleCanceledStart(); }
                     catch (Exception ex) { _session.Stop(); SuppressGameRestart(); AppLog.Write(ex); ShowNotice("Spielaufnahme konnte nicht starten: " + FriendlyMessage(ex.Message)); }
                 }
@@ -168,7 +218,7 @@ public sealed partial class AppController
                     _gameExitCounter ??= Stopwatch.GetTimestamp();
                     if (Stopwatch.GetElapsedTime(_gameExitCounter.Value) >= TimeSpan.FromSeconds(10))
                     {
-                        lock (_gameGate) { _gameDetection.MarkRecordingStopped(); _gameRecordingOwned = false; _gameExitCounter = null; }
+                        lock (_gameGate) { _gameDetection.MarkRecordingStopped(); _gameRecordingOwned = false; _gameAwaitingFirstCapture = false; _gameExitCounter = null; }
                         _session.Stop(); CancelPendingStart(); await StopCoreAsync("Spiel beendet · Aufnahme automatisch gestoppt"); ShowNotice(_message);
                     }
                 }

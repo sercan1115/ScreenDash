@@ -22,7 +22,7 @@ public sealed partial class MainForm : Form
     private readonly Label _pageTitle = TextLabel("Aufnahme", 27, Ink, FontStyle.Bold), _pageSubtitle = TextLabel("Dein Bildschirm. Als sicherer Rückblick.", 10, Muted), _headerState = new StatusPill { Text = "BEREIT", Dock = DockStyle.Fill, ForeColor = Cyan, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold), Margin = new Padding(0, 6, 0, 6) };
     private readonly Label _recordingState = TextLabel("Bereit für deinen Rückblick", 22, Ink, FontStyle.Bold), _recordingMessage = TextLabel("", 10, Muted), _elapsed = TextLabel("00:00:00", 28, Ink, FontStyle.Bold), _source = TextLabel("", 10, Muted);
     private readonly Label _encoder = TextLabel("GPU bevorzugt", 16, Ink, FontStyle.Bold), _cpu = TextLabel("0,0 %", 24, Ink, FontStyle.Bold), _memory = TextLabel("0 MB", 24, Ink, FontStyle.Bold), _fps = TextLabel("15 FPS", 24, Ink, FontStyle.Bold);
-    private readonly Label _encoderDetail = TextLabel("H.264 · Startprüfung", 8, Muted);
+    private readonly Label _encoderDetail = TextLabel("H.264 · Startprüfung", 8, Muted), _fpsDetail = TextLabel("Ziel: 60 FPS", 8, Muted);
     private readonly Label _storage = TextLabel("Speicher wird geprüft …", 14, Ink, FontStyle.Bold), _storageDetail = TextLabel("", 9, Muted), _storageEstimate = TextLabel("", 10, Cyan);
     private readonly Label _footer = TextLabel("Alles bleibt auf deinem PC.  ·  Keine Cloud, kein Upload.", 9, Muted), _settingsHint = TextLabel("", 9, Muted), _qualityEstimate = TextLabel("", 10, Cyan), _quotaEstimate = TextLabel("", 10, Cyan);
     private readonly StorageMeter _storageMeter = new() { Dock = DockStyle.Fill };
@@ -60,7 +60,7 @@ public sealed partial class MainForm : Form
     public MainForm(IAppController controller, bool startMinimized = false, bool enableHotkeys = true)
     {
         _controller = controller; _startMinimized = startMinimized; _enableHotkeys = enableHotkeys;
-        Text = "ScreenDash 1.7.0 · Bildschirm-Dashcam"; StartPosition = FormStartPosition.CenterScreen; ShowInTaskbar = true;
+        Text = "ScreenDash 1.7.1 · Bildschirm-Dashcam"; StartPosition = FormStartPosition.CenterScreen; ShowInTaskbar = true;
         ClientSize = new Size(1180, 780); MinimumSize = new Size(980, 660); AutoScaleMode = AutoScaleMode.Dpi;
         BackColor = Canvas; ForeColor = Ink; Font = new Font("Segoe UI", 10); DoubleBuffered = true;
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application; } catch { Icon = SystemIcons.Application; }
@@ -178,7 +178,11 @@ public sealed partial class MainForm : Form
         { _audio.Items.Add(new AudioSource(audioId, "Gespeicherte Audioausgabe · Nicht verfügbar")); _audio.SelectedIndex = _audio.Items.Count - 1; }
         }
         finally { _loadingSettings = previousLoading; }
-        if (!_loadingSettings && _settingsBaseline.Length > 0) UpdateDirtyState();
+        if (!_loadingSettings)
+        {
+            UpdateEstimates();
+            if (_settingsBaseline.Length > 0) UpdateDirtyState();
+        }
     }
     private static int FindSource(ComboBox choice, Func<object, bool> predicate) { for (int i = 0; i < choice.Items.Count; i++) if (choice.Items[i] is { } source && predicate(source)) return i; return choice.Items.Count > 0 ? 0 : -1; }
     private void ApplyProfile() => ApplyQualityPreset();
@@ -208,13 +212,14 @@ public sealed partial class MainForm : Form
         _headerState.Text = status.Recording ? "AUFNAHME LÄUFT" : busy ? "WIRD BEARBEITET" : paused ? "PAUSIERT" : idleDraft ? "ÄNDERUNGEN OFFEN" : "BEREIT"; _headerState.ForeColor = status.Recording ? Cyan : paused || idleDraft ? Amber : Muted;
         _recordingState.Text = status.Recording ? "Dein Rückblick läuft" : paused ? "Aufnahme pausiert" : busy ? "Einen Moment …" : "Bereit für deinen Rückblick"; _recordingMessage.Text = idleDraft ? "Ungespeicherte Änderungen · Start nutzt gespeicherte Einstellungen." : !string.IsNullOrWhiteSpace(status.PauseReason) && paused ? status.PauseReason : status.Message; _recordingMessage.ForeColor = idleDraft ? Amber : Muted; _elapsed.Text = $"{(int)status.Elapsed.TotalHours:00}:{status.Elapsed.Minutes:00}:{status.Elapsed.Seconds:00}";
         _autoStopCountdown.Text = status.Remaining is { } remaining ? $"{(paused ? "Pausiert · " : "Stopp in ")}{FormatDuration(remaining)}" : s.AutoStopMinutes > 0 ? $"Auto-Stopp: {s.AutoStopMinutes} Min." : "Auto-Stopp aus"; _autoStopCountdown.ForeColor = status.Remaining is { TotalSeconds: <= 60 } ? Amber : Muted;
-        _encoder.Text = string.IsNullOrWhiteSpace(status.Encoder) ? "GPU bevorzugt" : status.Encoder.Replace("NVIDIA ", "").Replace("Intel ", ""); _cpu.Text = $"{Math.Max(0, status.CpuPercent):0.0} %"; _memory.Text = $"{status.MemoryBytes / 1024d / 1024d:0} MB"; _fps.Text = $"{(status.Recording ? status.Fps : s.Fps):0.#} FPS";
+        _encoder.Text = string.IsNullOrWhiteSpace(status.Encoder) ? "GPU bevorzugt" : status.Encoder.Replace("NVIDIA ", "").Replace("Intel ", ""); _cpu.Text = $"{Math.Max(0, status.CpuPercent):0.0} %"; _memory.Text = $"{status.MemoryBytes / 1024d / 1024d:0} MB";
         bool softwareEncoder = status.Encoder.Contains("Software", StringComparison.OrdinalIgnoreCase) || status.Encoder.Contains("libx264", StringComparison.OrdinalIgnoreCase);
         bool hardwareEncoder = status.Encoder.Contains("NVENC", StringComparison.OrdinalIgnoreCase) || status.Encoder.Contains("AMF", StringComparison.OrdinalIgnoreCase) || status.Encoder.Contains("Quick Sync", StringComparison.OrdinalIgnoreCase) || status.Encoder.Contains("h264_qsv", StringComparison.OrdinalIgnoreCase);
         _encoderDetail.Text = softwareEncoder ? "Software · H.264" : hardwareEncoder ? "Hardware · H.264" : string.IsNullOrWhiteSpace(status.Encoder) ? "H.264 · Startprüfung" : "H.264";
         _tips.SetToolTip(_encoderDetail, softwareEncoder && !s.EncoderMode.Equals("Software", StringComparison.OrdinalIgnoreCase) ? "CPU-Kodierung als ausdrücklich erlaubte Ausweichlösung." : softwareEncoder ? "Die CPU übernimmt die Kodierung." : hardwareEncoder ? "Die GPU übernimmt die Kodierung." : "Der Encoder wird beim Aufnahmestart geprüft.");
         string audioSummary = (s.AudioEnabled, s.MicrophoneEnabled) switch { (true, true) => "Systemton + Mikrofon", (true, false) => "Systemton an", (false, true) => "Nur Mikrofon", _ => "Ohne Ton" };
-        var display = string.IsNullOrEmpty(s.DisplayId) ? _controller.Displays.FirstOrDefault() : _controller.Displays.FirstOrDefault(d => d.Id == s.DisplayId); _source.Text = $"{display?.Name ?? "Kein Bildschirm"}   ·   {audioSummary}   ·   {(s.SingleFile ? "Eine durchgehende Datei" : $"{s.SegmentMinutes} Min. pro Abschnitt")}";
+        var display = string.IsNullOrEmpty(s.DisplayId) ? _controller.Displays.FirstOrDefault() : _controller.Displays.FirstOrDefault(d => d.Id == s.DisplayId);
+        UpdateDashboardQuality(status, s, display, audioSummary);
         _sound.Text = status.AudioWarning.Length > 0 ? "⚠ " + status.AudioWarning : !status.Recording ? "Tonprüfung unter Einstellungen → Quelle" : $"Spielton {(s.AudioEnabled ? $"{status.AudioPeak * 100:0} %" : "aus")}   ·   Mikrofon {(s.MicrophoneEnabled ? $"{status.MicrophonePeak * 100:0} %" : "aus")}"; _sound.ForeColor = status.AudioWarning.Length > 0 ? Amber : Cyan;
         _tips.SetToolTip(_sound, status.AudioWarning.Length > 0 ? status.AudioWarning : $"Spielton: {status.AudioDevice}\nMikrofon: {status.MicrophoneDevice}");
         _toggle.Text = _stopping ? "Wird gestoppt …" : armed ? "Aufnahme stoppen" : "Aufnahme starten"; ((ThemeButton)_toggle).IconKind = armed ? AppGlyph.Stop : AppGlyph.Record; _toggle.Enabled = !_stopping && !_exitInProgress && (armed || !busy); _pause.Text = paused ? "Fortsetzen" : "Pause"; ((ThemeButton)_pause).IconKind = paused ? AppGlyph.Play : AppGlyph.Pause; _pause.Enabled = !busy && armed; _protect.Text = s.SingleFile ? "Aufnahme sichern" : $"{s.ProtectMinutes} Min. sichern"; _tips.SetToolTip(_protect, s.SingleFile ? "Sichert die gesamte laufende Datei sowie Aufnahmen aus den letzten eingestellten Minuten." : "Sichert ganze Abschnitte aus dem gewählten Zeitraum."); _protect.Enabled = !busy;

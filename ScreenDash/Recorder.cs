@@ -14,6 +14,7 @@ public sealed class Recorder : IDisposable
     private static readonly Encoder Software = new("CPU · Software", "libx264", ",hwdownload,format=bgra,format=yuv420p");
     private readonly SemaphoreSlim _lifecycle = new(1, 1);
     private readonly object _errorLock = new();
+    private readonly Func<IReadOnlyList<DisplaySource>> _getDisplays;
     private readonly Queue<string> _stderr = new();
     private volatile RecorderStatus _status = new(false, "", "Bereit", 0, 0, null);
     private Process? _process;
@@ -31,7 +32,13 @@ public sealed class Recorder : IDisposable
     private string _audioWarning = "";
     private long _audioGeneration;
     private bool _audioFaulted;
+    private EncoderPreferenceKey? _preferredEncoderKey;
+    private Encoder? _preferredEncoder;
     private static readonly object LogLock = new();
+
+    public Recorder() : this(DisplayCatalog.GetDisplays) { }
+    internal Recorder(Func<IReadOnlyList<DisplaySource>> getDisplays)
+        => _getDisplays = getDisplays ?? throw new ArgumentNullException(nameof(getDisplays));
 
     public event Action<RecorderStatus>? Changed;
     public RecorderStatus Status => _status;
@@ -66,7 +73,8 @@ public sealed class Recorder : IDisposable
         throw new FileNotFoundException("FFmpeg fehlt. Bitte ffmpeg.exe in den Programmordner oder dessen Unterordner tools kopieren.");
     }
 
-    public async Task StartAsync(AppSettings settings, DisplaySource display, string sessionPrefix, CancellationToken ct = default)
+    public async Task StartAsync(AppSettings settings, DisplaySource display, string sessionPrefix, CancellationToken ct = default,
+        Func<CancellationToken, Task>? beforeCapture = null)
     {
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
         using var startup = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -97,9 +105,11 @@ public sealed class Recorder : IDisposable
             Publish(new(false, "", "Hardware-Encoder wird mit dem ausgewählten Bildschirm geprüft …", 0, 0, null));
             var encoder = await SelectEncoderAsync(executable, options, display, startup.Token).ConfigureAwait(false);
             startup.Token.ThrowIfCancellationRequested();
-            // Probing can take several seconds. A hotplug may reuse an adapter/output index
-            // during that interval; never start recording a newly substituted desktop.
-            DisplayCatalog.ValidateSelection(display, DisplayCatalog.GetDisplays());
+            if (beforeCapture is not null) await beforeCapture(startup.Token).ConfigureAwait(false);
+            startup.Token.ThrowIfCancellationRequested();
+            // Probing and the asynchronous final gate can take several seconds. A hotplug
+            // may reuse an output index; validate after both before opening any capture source.
+            DisplayCatalog.ValidateSelection(display, _getDisplays());
             SessionPrefix = sessionPrefix;
             _firstFrame = new(TaskCreationOptions.RunContinuationsAsynchronously);
             if (options.AudioEnabled)
@@ -152,7 +162,7 @@ public sealed class Recorder : IDisposable
             if (!process.Start()) throw new IOException("FFmpeg konnte nicht gestartet werden.");
             LowerPriority(process);
             _stderrTask = ReadErrorsAsync(process);
-            _progressTask = ReadProgressAsync(process, encoder.Name, startedUtc, _firstFrame);
+            _progressTask = ReadProgressAsync(process, encoder.Name, startedUtc, _firstFrame, options.Fps);
             Publish(new(false, encoder.Name, "Aufnahme wird gestartet …", 0, 0, startedUtc));
             var exited = process.WaitForExitAsync(startup.Token);
             var deadline = Task.Delay(TimeSpan.FromSeconds(15), startup.Token);
@@ -200,13 +210,24 @@ public sealed class Recorder : IDisposable
             "software" or "cpu" => new[] { Software },
             _ => throw new ArgumentException("Unbekannter Encoder-Modus.")
         };
+        var preferenceKey = EncoderPreferenceKey.Create(executable, settings, display);
+        var preferred = mode == "auto" && preferenceKey is not null && preferenceKey == _preferredEncoderKey ? _preferredEncoder : null;
+        if (preferred is not null)
+            candidates = [preferred, .. candidates.Where(candidate => candidate != preferred)];
         var errors = new List<string>();
         foreach (var encoder in candidates)
         {
             ct.ThrowIfCancellationRequested();
             Publish(_status with { Encoder = encoder.Name, Message = $"Prüfe {encoder.Name} …" });
             var result = await ProbeAsync(executable, BuildArguments(settings, display, encoder, null, "", 0, true), ct).ConfigureAwait(false);
-            if (result.Success) return encoder;
+            if (result.Success)
+            {
+                if (encoder != Software && preferenceKey is not null)
+                { _preferredEncoderKey = preferenceKey; _preferredEncoder = encoder; }
+                return encoder;
+            }
+            if (encoder == _preferredEncoder && preferenceKey == _preferredEncoderKey)
+            { _preferredEncoderKey = null; _preferredEncoder = null; }
             errors.Add(encoder.Name + ": " + result.Error);
             WriteLog("Encoder probe " + encoder.Name + ": " + result.Error);
         }
@@ -379,10 +400,11 @@ public sealed class Recorder : IDisposable
         catch (ObjectDisposedException) { }
     }
 
-    private async Task ReadProgressAsync(Process process, string encoder, DateTime startedUtc, TaskCompletionSource<bool> firstFrame)
+    private async Task ReadProgressAsync(Process process, string encoder, DateTime startedUtc, TaskCompletionSource<bool> firstFrame, int targetFps)
     {
         long frames = 0;
         double fps = 0;
+        var recentFps = new RecentFrameRate(targetFps);
         var videoElapsed = TimeSpan.Zero;
         try
         {
@@ -401,7 +423,8 @@ public sealed class Recorder : IDisposable
                     if (ReferenceEquals(_process, process))
                     {
                         if (frames > 0) firstFrame.TrySetResult(true);
-                        Publish(new(!_intentionalStop && frames > 0, encoder, _intentionalStop ? "Aufnahme wird beendet …" : "Aufnahme läuft", fps, frames, startedUtc, VideoElapsed: videoElapsed));
+                        var deliveredFps = recentFps.Update(frames, Stopwatch.GetTimestamp(), fps);
+                        Publish(new(!_intentionalStop && frames > 0, encoder, _intentionalStop ? "Aufnahme wird beendet …" : "Aufnahme läuft", deliveredFps, frames, startedUtc, VideoElapsed: videoElapsed));
                     }
                 }
             }

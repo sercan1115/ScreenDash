@@ -2,13 +2,13 @@
 
 Eine lokale Bildschirm-Dashcam für **Windows 10/11 (64 Bit)**. ScreenDash zeichnet einen ausgewählten Monitor mit Systemton auf, speichert eine durchgehende Datei je Aufnahme und räumt alte Aufnahmen automatisch auf.
 
-**[Windows-Version herunterladen](https://github.com/sercan1115/ScreenDash/releases/latest)** · [Anleitung](README.de.md) · [Neuerungen in 1.7.0](NEU-IN-1.7.0.de.md)
+**[Windows-Version herunterladen](https://github.com/sercan1115/ScreenDash/releases/latest)** · [Anleitung](README.de.md) · [Neuerungen in 1.7.1](NEU-IN-1.7.1.de.md)
 
 ![ScreenDash – Aufnahmeübersicht mit Beispieldaten](docs/screenshots/dashboard.png)
 
 Die Bilder zeigen die Oberfläche mit Beispieldaten. Ihre Auslastungsanzeigen sind keine Messwerte.
 
-![Bewegte Silberlandschaft – vollständiger Zyklus mit Beispieldaten](docs/screenshots/background.gif)
+![Silberhintergrund aus Version 1.7.0 – vollständiger Zyklus mit Beispieldaten](docs/screenshots/background.gif)
 
 ## Funktionen
 
@@ -16,9 +16,9 @@ Die Bilder zeigen die Oberfläche mit Beispieldaten. Ihre Auslastungsanzeigen si
 - **Sehr hohe Videoqualität:** 60 FPS in nativer Monitorauflösung, H.264 High und hochwertige GPU-Kodierung. Automatische Bitrate: ungefähr 33,5 Mbit/s bei 1080p60, 55 Mbit/s bei 1440p60 und bis zu 100 Mbit/s bei 4K60. Sparprofile und manuelle Einstellungen bleiben verfügbar.
 - **Lebendiges Schwarz und Silber:** gefüllte, langsam wandernde Silberbänder mit Lichtkanten im Hintergrund, dunkle Karten, metallische Schaltflächen und große Serifenschrift. Die Hintergrundbewegung lässt sich abschalten und pausiert bei minimiertem oder verstecktem Fenster; Windows-Einstellungen für reduzierte Bewegung werden berücksichtigt.
 - **Weiche Bedienanimationen:** sanfte Seiten- und Reiterübergänge, Hover, Fokus und Druckeffekte. Klickflächen bleiben stabil; jede Eingabe wird sofort verarbeitet. Hintergrund bis zu 25 FPS, Bedienanimationen nur für einen kurzen Übergang.
-- **Klarere Bedienung:** korrekte Audio- und Encoderanzeigen, sichtbare offene Einstellungen, erklärte Archivaktionen und zugängliche Eingabefelder.
+- **Qualität direkt im Blick:** native Auflösung, gewünschte Bildrate und Zielbitrate im Dashboard. Die laufende FPS-Anzeige verwendet die letzten Sekunden. Qualitäts- und Speicherangaben werden auch nach Geräteaktualisierung und Mikrofonänderungen neu berechnet; offene Einstellungen bleiben erhalten.
 - **Lesezeichen:** während der Aufnahme Momente markieren, die ganze Datei schützen und später Clips davor/danach exportieren.
-- **Spielerkennung:** erst starten, wenn die ausgewählte Spiel-EXE ein sichtbares Fenster im Vordergrund hat. Launcher lösen keinen Start aus. Bei aktiver Spielerkennung entfällt der separate Aufnahmestart beim Programmstart; Alt-Tab unterbricht eine laufende Aufnahme nicht. Manuelles Stoppen wird respektiert. Anfangs ausgeschaltet.
+- **Spielerkennung:** erst starten, wenn die ausgewählte Spiel-EXE ein sichtbares Fenster im Vordergrund hat. Nach der Encoderprüfung wird das Spiel unmittelbar vor Aufnahmebeginn erneut geprüft. Launcher lösen keinen Start aus. Bei aktiver Spielerkennung entfällt der separate Aufnahmestart beim Programmstart; Alt-Tab unterbricht eine laufende Aufnahme nicht. Manuelles Stoppen wird respektiert. Anfangs ausgeschaltet.
 - **Aufnahmeprofile:** eigene Bildschirm-/Audio-/Qualitätseinstellungen speichern, ohne Speicherregeln oder Autostart zu verändern.
 - **Tonwarnungen und Mikrofon:** fehlenden Spielton anzeigen; optional Stimme und Systemton mit getrennten Lautstärken in einer gemeinsamen Tonspur aufnehmen.
 - **Manuelle Updates:** GitHub prüfen, Download abbrechen, SHA256 prüfen und zur neuen portablen EXE wechseln. Einstellungen und Aufnahmen bleiben erhalten.
@@ -72,7 +72,7 @@ Die derzeit veröffentlichte EXE ist **nicht digital signiert**; Windows-SmartSc
 
 ## Auf geringe Belastung ausgelegt
 
-ScreenDash nutzt DirectX Desktop Duplication und prüft beim Start einen Hardware-Encoder: NVIDIA NVENC, AMD AMF oder Intel Quick Sync. Neue Einstellungen verwenden **Sehr hohe Qualität mit 60 FPS und automatischer Bitrate passend zur Monitorauflösung**. Bestehende manuelle Bitraten bleiben beim Update erhalten; das neue Profil lässt sich unter Einstellungen → Qualität auswählen und speichern. Sparprofile mit 10 oder 15 FPS und individuelle Einstellungen sind ebenfalls verfügbar. CPU-Encoding muss ausdrücklich erlaubt werden.
+ScreenDash nutzt DirectX Desktop Duplication und prüft beim Start einen Hardware-Encoder: NVIDIA NVENC, AMD AMF oder Intel Quick Sync. Ein in dieser App-Sitzung erfolgreich geprüfter Encoder wird bei gleicher Konfiguration zuerst erneut geprüft; das vermeidet wiederholte erfolglose Prüfungen anderer Encoder beim Fortsetzen. Neue Einstellungen verwenden **Sehr hohe Qualität mit 60 FPS und automatischer Bitrate passend zur Monitorauflösung**. Bestehende manuelle Bitraten bleiben beim Update erhalten; das neue Profil lässt sich unter Einstellungen → Qualität auswählen und speichern. Sparprofile mit 10 oder 15 FPS und individuelle Einstellungen sind ebenfalls verfügbar. CPU-Encoding muss ausdrücklich erlaubt werden.
 
 Eine laufende Videovorschau entfällt; Audio verwendet einen begrenzten Puffer und FFmpeg läuft mit niedriger Prozesspriorität. Aufnahme und Dateischreiben benötigen dennoch CPU, GPU und Speicherbandbreite. Der kurze AMD-Test und seine Grenzen stehen im [Testbericht](TESTBERICHT.de.md); eine bestimmte Spieleleistung wird nicht zugesichert.
 
@@ -88,7 +88,7 @@ cd ScreenDash
 .\build.ps1
 ```
 
-Das Skript führt 263 Funktionsprüfungen, 221 Oberfläche-/Animationsprüfungen mit künstlichen Daten, 20 isolierte Windows-Verknüpfungsprüfungen und 5 Signiervalidierungen aus. Es baut die portable App nach `dist`. GitHub Actions führt dieselben 509 Prüfungen auf Windows aus und erzeugt ein Build-Artefakt. Die Windows-Version steht in den Releases.
+Das Skript führt 327 Funktionsprüfungen, 239 Oberfläche-/Animationsprüfungen mit künstlichen Daten, 20 isolierte Windows-Verknüpfungsprüfungen und 5 Signiervalidierungen aus. Es baut die portable App nach `dist`. GitHub Actions führt dieselben 591 Prüfungen auf Windows aus und erzeugt ein Build-Artefakt. Die Windows-Version steht in den Releases.
 
 Zusätzliche Integrationstests benötigen einen interaktiven Windows-Desktop, einen Monitor, FFmpeg und gegebenenfalls ein Audiogerät. Sie zeichnen echte Bildschirminhalte auf und sind daher kein Bestandteil des CI-Laufs. Hinweise und Ergebnisse: [Testbericht](TESTBERICHT.de.md).
 

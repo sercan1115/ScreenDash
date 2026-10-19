@@ -151,6 +151,137 @@ internal static class ControllerFeatureChecks
             await CheckGamesAsync();
             Check(!session.Armed && !controller.Status.Recording && controller.Status.Message.Contains("Spiel beendet"), "Game exit stops its owned paused session after the grace period");
 
+            // Run the exact pre-capture callback after an artificial delayed encoder
+            // probe. No Recorder.StartAsync call or capture device is needed here.
+            Field("_busy").SetValue(controller, true);
+            void SeedInitialGameStart()
+            {
+                failedSnapshot = false; running = [new("arena.exe", 123)]; games.Reset();
+                session.Stop(); session.Start(); games.MarkRecordingStarted();
+                Field("_gameRecordingOwned").SetValue(controller, true);
+                Field("_gameAwaitingFirstCapture").SetValue(controller, true);
+                Field("_gameExitCounter").SetValue(controller, OldCounter());
+            }
+            Task ValidateGameStart(AppSettings requested, long stopRequest, CancellationToken ct = default)
+                => (Task)Method("RevalidateGameStartAsync").Invoke(controller, [requested, stopRequest, ct])!;
+            async Task<bool> WasPolicyRejected(Task startup)
+            {
+                try { await startup.WaitAsync(TimeSpan.FromSeconds(2)); return false; }
+                catch (OperationCanceledException ex) when (ex.GetType().Name == "GameStartNoLongerEligibleException") { return true; }
+            }
+            try
+            {
+                foreach (string change in new[] { "exit", "focus", "unknown" })
+                {
+                    SeedInitialGameStart();
+                    Check(games.Evaluate(["arena.exe"]).HasForegroundGame,
+                        $"Pre-capture revalidation retains the foreground fact after initial ownership ({change})");
+                    var requested = controller.Settings;
+                    long stopRequest = (long)Field("_stopRequests").GetValue(controller)!;
+                    var probeFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                    async Task DelayedStartup()
+                    {
+                        await probeFinished.Task;
+                        await ValidateGameStart(requested, stopRequest);
+                    }
+                    var startup = DelayedStartup();
+                    if (change == "exit") running = [];
+                    else if (change == "focus") running = [new("arena.exe", 123, true, false)];
+                    else failedSnapshot = true;
+                    probeFinished.SetResult();
+                    Check(await WasPolicyRejected(startup) && !session.Armed
+                        && Field("_gameRecordingOwned").GetValue(controller)!.Equals(false)
+                        && Field("_gameAwaitingFirstCapture").GetValue(controller)!.Equals(false)
+                        && Field("_gameExitCounter").GetValue(controller) is null
+                        && controller.Status.Message.Contains("warte", StringComparison.OrdinalIgnoreCase)
+                        && recorder.ProcessId is null && Field("_pendingStart").GetValue(controller) is null,
+                        $"A game {change} during encoder preparation disarms only its initial start before capture");
+                    failedSnapshot = false; running = [new("arena.exe", 123)];
+                    Check(games.Evaluate(["arena.exe"]).ShouldStart && !session.Armed,
+                        $"A fresh foreground snapshot can retry after initial-start {change}, without manual Stop suppression");
+                }
+
+                SeedInitialGameStart();
+                var changedSelection = controller.Settings;
+                long selectionStopRequest = (long)Field("_stopRequests").GetValue(controller)!;
+                Settings(settings => settings.GameExecutables = ["other.exe"]);
+                Check(await WasPolicyRejected(ValidateGameStart(changedSelection, selectionStopRequest))
+                    && !session.Armed && recorder.ProcessId is null,
+                    "A changed game selection rejects the stale automatic intent immediately before capture");
+                Settings(settings => settings.GameExecutables = ["arena.exe"]);
+
+                SeedInitialGameStart();
+                var stopSettings = controller.Settings;
+                long stoppedRequest = (long)Field("_stopRequests").GetValue(controller)!;
+                blockSnapshot = true; snapshotEntered.Reset(); snapshotRelease.Reset();
+                using (var pendingStartup = new CancellationTokenSource())
+                {
+                    Field("_pendingStart").SetValue(controller, pendingStartup);
+                    try
+                    {
+                        var stopDuringValidation = ValidateGameStart(stopSettings, stoppedRequest, pendingStartup.Token);
+                        if (!snapshotEntered.Wait(TimeSpan.FromSeconds(2))) throw new TimeoutException("Pre-capture snapshot did not start.");
+                        await controller.StopAsync().WaitAsync(TimeSpan.FromSeconds(1));
+                        Check(!session.Armed && !snapshotRelease.IsSet,
+                            "Stop remains immediate while the final pre-capture game snapshot is delayed");
+                        try { await stopDuringValidation.WaitAsync(TimeSpan.FromSeconds(1)); throw new InvalidOperationException("Stop must cancel the initial game start."); }
+                        catch (OperationCanceledException ex) when (ex.GetType().Name != "GameStartNoLongerEligibleException")
+                        {
+                            Check(!snapshotRelease.IsSet && !session.Armed && pendingStartup.IsCancellationRequested
+                                && recorder.ProcessId is null,
+                                "The final game validation exits cancellation before a slow process snapshot returns");
+                        }
+                    }
+                    finally
+                    {
+                        Field("_pendingStart").SetValue(controller, null);
+                        blockSnapshot = false; snapshotRelease.Set();
+                    }
+                }
+                Check(!games.Evaluate(["arena.exe"]).ShouldStart && !session.Armed
+                    && Field("_gameAwaitingFirstCapture").GetValue(controller)!.Equals(false)
+                    && recorder.ProcessId is null && controller.Status.Message == "Aufnahme gestoppt",
+                    "Stop takes precedence over final game validation and preserves explicit restart suppression");
+
+                SeedInitialGameStart();
+                await ValidateGameStart(controller.Settings, (long)Field("_stopRequests").GetValue(controller)!);
+                Check(session.CanCapture && Field("_gameRecordingOwned").GetValue(controller)!.Equals(true)
+                    && recorder.ProcessId is null,
+                    "A fresh selected foreground game preserves the initial capture intent without opening devices in policy checks");
+                session.Pause(); running = [new("arena.exe", 123, true, false)];
+                Check(games.Evaluate(["arena.exe"]).HasGames && !games.Evaluate(["arena.exe"]).ShouldStop,
+                    "The extra initial-start validation leaves ongoing Alt Tab ownership unchanged");
+
+                foreach (string pause in new[] { "manual", "privacy" })
+                {
+                    SeedInitialGameStart();
+                    if (pause == "manual") { session.Pause(); session.Resume(); }
+                    else { session.SetPrivacy(true, false, true); session.SetPrivacy(false, false, true); }
+                    var resumedValidation = (Func<CancellationToken, Task>?)Method("PendingGameStartValidation").Invoke(controller, null);
+                    Check(resumedValidation is not null && Field("_gameAwaitingFirstCapture").GetValue(controller)!.Equals(true),
+                        $"A {pause} pause before the first frame keeps final game validation attached to resume");
+                    running = [];
+                    Check(await WasPolicyRejected(resumedValidation!(CancellationToken.None))
+                        && !session.Armed && Field("_gameAwaitingFirstCapture").GetValue(controller)!.Equals(false)
+                        && recorder.ProcessId is null,
+                        $"A game exiting during an initial {pause} pause cannot start on resume");
+                }
+
+                SeedInitialGameStart();
+                Method("OnRecorderChanged").Invoke(controller, [new RecorderStatus(true, "Synthetic", "First synthetic frame", 60, 1, DateTime.UtcNow)]);
+                Check(Field("_gameAwaitingFirstCapture").GetValue(controller)!.Equals(false),
+                    "The first recording status clears the pending automatic-start requirement");
+                session.Pause(); session.Resume(); running = [new("arena.exe", 123, true, false)];
+                Check(Method("PendingGameStartValidation").Invoke(controller, null) is null
+                    && Field("_gameRecordingOwned").GetValue(controller)!.Equals(true),
+                    "An already-started game session resumes or recovers without a new foreground requirement");
+                session.Stop();
+                Method("OnRecorderChanged").Invoke(controller, [new RecorderStatus(false, "", "Bereit", 0, 0, null)]);
+                games.Reset(); Field("_gameRecordingOwned").SetValue(controller, false);
+                Field("_gameAwaitingFirstCapture").SetValue(controller, false);
+            }
+            finally { blockSnapshot = false; snapshotRelease.Set(); Field("_busy").SetValue(controller, false); }
+
             Settings(settings => { settings.GameDetectionEnabled = false; settings.AudioEnabled = true; settings.WarnOnSilence = true; settings.SystemGainPercent = 100; });
             Recording(); Silence();
             Check(Field("_silentSinceCounter").GetValue(controller) is long && controller.Status.AudioWarning.Length == 0,

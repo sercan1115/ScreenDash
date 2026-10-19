@@ -28,7 +28,7 @@ internal static class Program
         using var controller = new PreviewController();
         using var form = new MainForm(controller, enableHotkeys: false);
         form.Icon = previewIcon;
-        form.Text = "ScreenDash 1.7.0 · Vorschau mit Beispieldaten";
+        form.Text = "ScreenDash 1.7.1 · Vorschau mit Beispieldaten";
         form.StartPosition = FormStartPosition.Manual;
         form.Location = new Point(-20000, -20000);
         form.ClientSize = new Size(1180, 780);
@@ -587,6 +587,25 @@ internal static class Program
             Check(Field<Label>("_source").Text.Contains(mode.Text), $"dashboard reports saved audio mode: {mode.Text}");
         }
         controller.Settings.AudioEnabled = savedSystemAudio; controller.Settings.MicrophoneEnabled = savedMicrophoneAudio;
+        Call("RefreshDashboard");
+        Check(Field<Label>("_source").Text.Contains("2560 × 1440") && Field<Label>("_source").Text.Contains($"{controller.Settings.Fps} FPS") && Field<Label>("_source").Text.Contains("Mbit/s Ziel"),
+            "the dashboard visibly explains native dimensions, requested frame rate and nominal target bitrate");
+        Check(Tip("_source").Contains(controller.Displays[0].Name) && Tip("_source").Contains("Eine durchgehende Datei") && Tip("_source").Contains("Gespeichertes") && Field<Label>("_source").AccessibleDescription == Tip("_source"),
+            "the compact quality summary keeps complete saved source identity and file mode accessible");
+        controller.Settings.SingleFile = false; controller.Settings.SegmentMinutes = 7; Call("RefreshDashboard");
+        Check(Tip("_source").Contains("7 Min. pro Abschnitt"), "the quality summary also exposes segmented file mode");
+        controller.Settings.SingleFile = true;
+        Check(Field<Label>("_fpsDetail").Text == $"Ziel: {controller.Settings.Fps} FPS" && Tip("_fps").Contains("erst während"),
+            "an idle frame-rate metric describes the saved target rather than claiming a live measurement");
+        controller.Recording = true; controller.RecordingFps = 43.2; Call("RefreshDashboard");
+        Check(Field<Label>("_fps").Text == $"{43.2:0.#} FPS" && Field<Label>("_fpsDetail").Text.Contains($"Ziel: {controller.Settings.Fps} FPS") && Tip("_fps").Contains("Aktuell gemessene"),
+            "the dashboard separates recently delivered recording frames from the requested target");
+        controller.RecordingFps = 0; Call("RefreshDashboard");
+        Check(Field<Label>("_fps").Text == "0 FPS", "zero delivered frames cannot silently turn into the requested target");
+        controller.Recording = false; controller.Paused = true; Call("RefreshDashboard");
+        Check(Field<Label>("_fps").Text == "—" && Field<Label>("_fpsDetail").Text.Contains("Pausiert") && Tip("_fps").Contains("pausiert"),
+            "a paused recording does not show a target value as if capture were still producing frames");
+        controller.Paused = false; controller.RecordingFps = null; Call("RefreshDashboard");
         string savedEncoder = controller.Encoder;
         foreach (string encoder in new[] { "NVIDIA NVENC", "AMD AMF", "Intel Quick Sync", "h264_qsv" })
         {
@@ -788,6 +807,32 @@ internal static class Program
                 "selecting another monitor recalculates its adaptive bitrate and storage estimate immediately");
             selectedDisplay.SelectedIndex = 0;
             Check(qualityEstimate.Text == largerDisplayEstimate, "returning to the first monitor restores its original native-resolution estimate");
+            var originalDisplays = qualityController.Displays;
+            QualityField<NumericUpDown>("_customFps").Value = 47; manualBitrate.Value = 8123; qualityMode.SelectedIndex = 0;
+            string oldQuota = QualityField<Label>("_quotaEstimate").Text;
+            qualityController.Displays = [originalDisplays[0] with { Name = "Bildschirm 1 · neue Auflösung", Width = 1920, Height = 1080 }, originalDisplays[1]];
+            QualityCall("LoadDevices", true);
+            Check(qualityEstimate.Text.Contains("1920 × 1080") && qualityEstimate.Text.Contains($"{RecordingQuality.ResolveBitrateKbps(QualityDraft(), qualityController.Displays[0]) / 1000d:0.0} Mbit/s") && QualityField<Label>("_quotaEstimate").Text != oldQuota,
+                "refreshing a monitor with the same identity recalculates its changed native resolution and adaptive storage budget");
+            Check(QualityDraft().Fps == 47 && QualityDraft().VideoBitrateKbps == 8123 && QualityDraft().EncodingQuality == "Efficiency" && QualityDraft().AutoVideoBitrate && QualityField<Button>("_save").Enabled,
+                "a device refresh preserves every unsaved quality field instead of resetting the draft to stored settings");
+            automaticBitrate.Checked = false; qualityController.Displays = originalDisplays; QualityCall("LoadDevices", true);
+            Check(qualityEstimate.Text.Contains("2560 × 1440") && qualityEstimate.Text.Contains($"{8.123:0.0} Mbit/s") && QualityDraft().VideoBitrateKbps == 8123 && !QualityDraft().AutoVideoBitrate,
+                "manual bitrate remains fixed when refreshed monitor geometry changes");
+            qualityController.Displays = [originalDisplays[1]]; QualityCall("LoadDevices", true);
+            Check(selectedDisplay.SelectedItem is DisplaySource { Id: "test", AdapterIndex: < 0 } && qualityEstimate.Text.Contains("verbundenen Bildschirm") && !qualityEstimate.Text.Contains("Mbit/s"),
+                "a disconnected selected monitor stays explicitly disconnected rather than silently selecting another screen");
+            Check(QualityField<Label>("_quotaEstimate").Text.Contains("verbundenen Bildschirm") && QualityField<Label>("_quotaEstimate").ForeColor == Color.FromArgb(170, 175, 183),
+                "disconnecting the selected screen clears its obsolete duration forecast and warning colour");
+            Check(QualityField<NumericUpDown>("_customFps").Value == 47 && manualBitrate.Value == 8123 && qualityMode.SelectedIndex == 0 && !automaticBitrate.Checked && qualityController.Settings.Fps == 60 && qualityController.Settings.AutoVideoBitrate,
+                "a missing monitor preserves the draft without changing saved capture preferences");
+            QualityCall("RefreshDashboard");
+            Check(QualityField<Label>("_source").Text.Contains("Kein Bildschirm verbunden") && !QualityField<Label>("_source").Text.Contains("Mbit/s"),
+                "the dashboard clears quality claims when the saved display is unavailable");
+            qualityController.Displays = originalDisplays; QualityCall("LoadDevices", true);
+            Check(selectedDisplay.SelectedItem is DisplaySource { Id: "test", Width: 2560 } && qualityEstimate.Text.Contains("2560 × 1440"),
+                "reconnecting the selected monitor restores its quality forecast without requiring another setting edit");
+            QualityCall("LoadSettings");
             automaticBitrate.Checked = false; manualBitrate.Value = 18432; qualityMode.SelectedIndex = 1;
             Check(manualBitrate.Enabled && !QualityDraft().AutoVideoBitrate && QualityDraft().VideoBitrateKbps == 18432 && QualityDraft().EncodingQuality == "Balanced" && QualityField<ComboBox>("_profile").SelectedIndex == 4,
                 "manual bitrate and encoder quality remain independent and mark a custom draft");
@@ -814,6 +859,17 @@ internal static class Program
             QualityField<Button>("_discard").PerformClick();
             Check(automaticBitrate.Checked && qualityMode.SelectedIndex == 2 && !QualityField<Button>("_save").Enabled,
                 "discarding quality changes restores both adaptive bitrate and encoder quality together");
+            automaticBitrate.Checked = false; manualBitrate.Value = 500;
+            QualityField<CheckBox>("_audioEnabled").Checked = false;
+            string silentDraftEstimate = qualityEstimate.Text;
+            QualityField<CheckBox>("_microphoneEnabled").Checked = true;
+            var microphoneOnlyEstimate = RecordingEstimates.Calculate(QualityDraft(), display: (DisplaySource)selectedDisplay.SelectedItem!);
+            Check(qualityEstimate.Text != silentDraftEstimate && qualityEstimate.Text.Contains($"{microphoneOnlyEstimate.GiBPerHour:0.0} GB pro Stunde") && !qualityController.Settings.MicrophoneEnabled,
+                "an unsaved microphone-only draft immediately includes its audio bitrate without enabling the saved microphone");
+            QualityField<CheckBox>("_microphoneEnabled").Checked = false;
+            Check(qualityEstimate.Text == silentDraftEstimate,
+                "disabling a draft microphone immediately restores the silent-video budget");
+            QualityCall("LoadSettings");
             qualityController.Settings.AutoVideoBitrate = false; qualityController.Settings.VideoBitrateKbps = 3000;
             qualityController.Settings.Fps = 15; qualityController.Settings.EncodingQuality = "Efficiency";
             QualityCall("LoadSettings");
@@ -917,6 +973,8 @@ internal static class Program
         Call("ShowPage", 0); Call("CompletePageTransition"); form.PerformLayout(); Application.DoEvents();
         Check(!Field<Panel>("_dashboard").VerticalScroll.Visible, "compact dashboard presents its controls and metrics without a page scrollbar");
         Check(Field<Label>("_encoderDetail").Visible && Field<Label>("_encoderDetail").Parent is not null, "the live encoder detail is connected to the visible dashboard metric");
+        Check(Field<Label>("_fpsDetail").Visible && Field<Label>("_fpsDetail").Parent is not null && TextRenderer.MeasureText(Field<Label>("_fpsDetail").Text, Field<Label>("_fpsDetail").Font, Size.Empty, TextFormatFlags.NoPadding | TextFormatFlags.SingleLine).Width <= Field<Label>("_fpsDetail").ClientSize.Width,
+            "the target-versus-current frame-rate detail fits the compact metric without growing the dashboard");
         Check(new[] { "_toggle", "_pause", "_protect", "_bookmark" }.Select(Field<Button>).All(button => button.Parent!.ClientRectangle.Contains(button.Bounds)), "all four dashboard capture actions stay inside their compact viewport");
         Check(new[] { "_toggle", "_pause", "_protect", "_bookmark" }.Select(Field<Button>).All(button => TextRenderer.MeasureText(button.Text, button.Font, Size.Empty, TextFormatFlags.NoPadding | TextFormatFlags.SingleLine).Width + 44 * form.DeviceDpi / 96 <= button.ClientSize.Width), "compact capture buttons fit their full action labels alongside their icons");
         string[] bodyText = ["_pageSubtitle", "_recordingMessage", "_source", "_footer", "_encoderDetail", "_autoStopCountdown"];
@@ -1168,10 +1226,11 @@ internal sealed class PreviewController : IAppController
     public IReadOnlyList<RecordingInfo>? ArchiveOverride { get; set; }
     public TimeSpan? Remaining { get; set; } = TimeSpan.FromMinutes(42.6);
     public AppSettings Settings { get; private set; } = new() { RecordingDirectory = @"C:\Videos\ScreenDash", DisplayId = "test", AudioDeviceId = "speakers", AutoStopMinutes = 60 };
-    public IReadOnlyList<DisplaySource> Displays { get; } = [new("test", "Bildschirm 1 · 2560 × 1440", 0, 0, 0, 0, 2560, 1440), new("second", "Bildschirm 2 · 1920 × 1080", 0, 1, 2560, 0, 1920, 1080)];
+    public IReadOnlyList<DisplaySource> Displays { get; set; } = [new("test", "Bildschirm 1 · 2560 × 1440", 0, 0, 0, 0, 2560, 1440), new("second", "Bildschirm 2 · 1920 × 1080", 0, 1, 2560, 0, 1920, 1080)];
     public IReadOnlyList<AudioSource> Microphones { get; } = [new("mic", "Headset · Mikrofon"), new("usb", "USB · Mikrofon")];
     public IReadOnlyList<AudioSource> AudioDevices { get; } = [new("speakers", "Lautsprecher · Realtek Audio"), new("headset", "Headset · Spielausgabe")];
-    public DashboardStatus Status => new(Recording, StartPending || StopPending, Recording ? "Bildschirm 1 wird im Hintergrund aufgenommen. Du kannst ScreenDash minimieren." : "Bereit für die erste Aufnahme", Encoder, TimeSpan.FromMinutes(17.4), Recording ? 1.7 : 0.2, 83 * 1024L * 1024, Recording ? Settings.Fps : 0,
+    public double? RecordingFps { get; set; }
+    public DashboardStatus Status => new(Recording, StartPending || StopPending, Recording ? "Bildschirm 1 wird im Hintergrund aufgenommen. Du kannst ScreenDash minimieren." : "Bereit für die erste Aufnahme", Encoder, TimeSpan.FromMinutes(17.4), Recording ? 1.7 : 0.2, 83 * 1024L * 1024, Recording ? RecordingFps ?? Settings.Fps : 0,
         new(0, 0, 6L * 1024 * 1024 * 1024, 512L * 1024 * 1024, 185L * 1024 * 1024 * 1024, true, ""), Armed: Recording || Paused || StartPending && !_startCanceled, Paused: Paused, PauseReason: Paused ? "Manuell pausiert" : "", AudioPeak: Recording ? 0.26 : 0, AudioDevice: "Headset · Spielausgabe", Remaining: Recording || Paused ? Remaining : null, GameDetectionMessage: GameDetectionMessage);
     public event Action? Changed;
     public event Action<string>? Notice { add { } remove { } }

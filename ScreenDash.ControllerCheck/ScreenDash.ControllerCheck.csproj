@@ -19,6 +19,8 @@
     <Compile Include="../ScreenDash/SettingsStore.cs" Link="SettingsStore.cs" />
     <Compile Include="../ScreenDash/AppLog.cs" Link="AppLog.cs" />
     <Compile Include="../ScreenDash/Recorder.cs" Link="Recorder.cs" />
+    <Compile Include="../ScreenDash/EncoderPreferenceKey.cs" Link="EncoderPreferenceKey.cs" />
+    <Compile Include="../ScreenDash/RecentFrameRate.cs" Link="RecentFrameRate.cs" />
     <Compile Include="../ScreenDash/AudioLoopback.cs" Link="AudioLoopback.cs" />
     <Compile Include="../ScreenDash/MicrophoneCapture.cs" Link="MicrophoneCapture.cs" />
     <Compile Include="../ScreenDash/ClockedAudioBuffer.cs" Link="ClockedAudioBuffer.cs" />

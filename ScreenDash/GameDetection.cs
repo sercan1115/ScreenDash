@@ -6,7 +6,7 @@ namespace ScreenDash;
 
 public sealed record GameProcess(string ExecutableName, int SessionId, bool HasVisibleWindow = true, bool IsForeground = true, int ProcessId = 0);
 public sealed record GameDetectionResult(bool HasGames, bool ShouldStart, bool ShouldStop, IReadOnlyList<string> RunningGames,
-    bool SnapshotReliable = true, string Diagnostic = "");
+    bool SnapshotReliable = true, string Diagnostic = "", bool HasForegroundGame = false);
 
 /// <summary>Exact process names plus visible foreground windows; sampled only when detection is enabled.</summary>
 public sealed class GameDetection
@@ -78,7 +78,7 @@ public sealed class GameDetection
                 : foregroundGame ? "Spiel im Vordergrund erkannt · " + string.Join(", ", running) + "." + ignoredHint
                 : hasGames ? "Prozess läuft im Hintergrund · für den Start das Spielfenster öffnen und aktivieren." + ignoredHint
                 : "Warte auf ein ausgewähltes Spiel im Vordergrund." + ignoredHint;
-            return new(hasGames, foregroundGame && !_suppressed && !_ownsRecording, !hasGames && _ownsRecording, running, true, _lastDiagnostic);
+            return new(hasGames, foregroundGame && !_suppressed && !_ownsRecording, !hasGames && _ownsRecording, running, true, _lastDiagnostic, foregroundGame);
         }
     }
 

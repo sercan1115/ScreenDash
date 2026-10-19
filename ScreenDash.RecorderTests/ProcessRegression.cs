@@ -44,6 +44,12 @@ internal static class ProcessRegression
             ExpectDisplayFailure(display, [display with { Width = 2560 }]);
             ExpectDisplayFailure(display, [display with { X = 1920 }]);
 
+            CheckRecentFrameRate();
+            CheckEncoderPreferenceKeys(scratch, display);
+            await CheckEncoderPreferenceAsync(fake, display, log);
+            await CheckBeforeCaptureAsync(scratch, display, log);
+            await CheckProgressAsync(apphost, log);
+
             var flood = await ProbeAsync(apphost, ["--fake-ffmpeg", "flood"], CancellationToken.None);
             Check(!flood.Success && flood.Error.EndsWith("TAIL", StringComparison.Ordinal) && flood.Error.Length <= 4000,
                 "Encoder probe drains both streams and retains only the bounded error tail");
@@ -131,6 +137,18 @@ internal static class ProcessRegression
 
     internal static async Task<int> RunFakeAsync(string[] arguments)
     {
+        if (arguments[0] == "progress")
+        {
+            File.WriteAllText(arguments[1], Environment.ProcessId.ToString());
+            Console.WriteLine("frame=60\nfps=NaN\nout_time_us=1000000\nprogress=continue");
+            var ready = Stopwatch.StartNew();
+            while (!File.Exists(arguments[1] + ".progress-release") && ready.Elapsed < TimeSpan.FromSeconds(5)) await Task.Delay(20);
+            if (!File.Exists(arguments[1] + ".progress-release")) return 9;
+            await Task.Delay(650);
+            Console.WriteLine("frame=90\nfps=Infinity\nout_time_us=1500000\nprogress=continue");
+            Console.WriteLine("frame=2\nfps=-999\nout_time_us=-1\nprogress=end");
+            return 0;
+        }
         if (arguments[0] == "flood")
         {
             Console.Error.Write(new string('e', 12000) + "TAIL");
@@ -144,6 +162,18 @@ internal static class ProcessRegression
 
     internal static async Task<int> RunFakeExportAsync(string[] arguments)
     {
+        if (arguments.Contains("-frames:v"))
+        {
+            var probeLog = Environment.GetEnvironmentVariable(FakeLogVariable)!;
+            var codec = arguments[Array.IndexOf(arguments, "-c:v") + 1];
+            File.AppendAllText(probeLog + ".probe-order", codec + "\n");
+            File.WriteAllText(probeLog, Environment.ProcessId.ToString());
+            var results = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(probeLog + ".probe-results.json"))!;
+            var probeMode = results.GetValueOrDefault(codec, "fail");
+            if (probeMode == "wait") await Task.Delay(Timeout.InfiniteTimeSpan);
+            if (probeMode != "success") Console.Error.WriteLine("Synthetic unavailable encoder: " + codec);
+            return probeMode == "success" ? 0 : 9;
+        }
         var source = arguments[Array.IndexOf(arguments, "-i") + 1];
         var output = arguments[^1];
         var mode = File.ReadAllText(source);
@@ -316,9 +346,213 @@ internal static class ProcessRegression
         ClearLog();
     }
 
-    private static Process StartFake(string apphost, string mode, string log)
+    private static void CheckRecentFrameRate()
     {
-        var start = new ProcessStartInfo(apphost) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true };
+        var type = typeof(Recorder).Assembly.GetType("ScreenDash.RecentFrameRate")!;
+        object Create(int limit = 60) => Activator.CreateInstance(type, BindingFlags.Instance | BindingFlags.NonPublic, null, [limit], CultureInfo.InvariantCulture)!;
+        double Update(object meter, long frames, double seconds, double fallback = 60) => (double)type.GetMethod("Update", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(meter, [frames, (long)((seconds + 10) * Stopwatch.Frequency), fallback])!;
+        var meter = Create();
+        Check(Update(meter, 0, 0, double.NaN) == 0 && Update(meter, 0, 0, double.PositiveInfinity) == 0,
+            "Recent FPS startup and repeated timestamps stay finite with invalid encoder statistics");
+        meter = Create();
+        Check(Update(meter, 1, 0, 500) == 60, "Startup FPS is bounded by the chosen recording target");
+        Check(Math.Abs(Update(meter, 61, 1) - 60) < 0.001, "Delivered FPS uses frame increments over monotonic wall time");
+        for (int second = 2; second <= 60; second++) Update(meter, 1 + second * 60, second);
+        for (int second = 61; second <= 66; second++) Update(meter, 3601 + (second - 60) * 10, second);
+        Check(Math.Abs(Update(meter, 3661, 66) - 10) < 0.001,
+            "A recent drop to ten FPS is visible even after a minute at sixty FPS");
+        for (int second = 67; second <= 72; second++) Update(meter, 3661 + (second - 66) * 60, second);
+        Check(Math.Abs(Update(meter, 4021, 72) - 60) < 0.001, "Recovered frame delivery replaces the old slow window");
+        Check(Update(meter, 4021, 82) == 0, "A sparse progress report with no new frames includes the stalled interval");
+        Check(Update(meter, 2, 83, 3) == 3 && Math.Abs(Update(meter, 62, 84) - 60) < 0.001,
+            "A reset frame counter starts a new finite measurement window");
+        Check(Update(meter, 63, 0, double.NegativeInfinity) == 0,
+            "A backward clock sample resets safely instead of producing a negative rate");
+        meter = Create(30);
+        Check(Update(meter, -1, 0, -50) == 0 && Update(meter, long.MaxValue, 1) == 30,
+            "Negative counters and enormous frame jumps remain inside the configured FPS bound");
+        meter = Create();
+        double final = 0;
+        for (int sample = 0; sample <= 10_000; sample++) final = Update(meter, sample * 6, sample / 10d);
+        Check(Math.Abs(final - 60) < 0.001, "Long high-frequency progress streams retain a bounded recent measurement");
+    }
+
+    private static void CheckEncoderPreferenceKeys(string scratch, DisplaySource display)
+    {
+        var executable = Path.Combine(scratch, "identity.exe");
+        File.WriteAllText(executable, "synthetic executable identity");
+        var type = typeof(Recorder).Assembly.GetType("ScreenDash.EncoderPreferenceKey")!;
+        var method = type.GetMethod("Create", BindingFlags.Static | BindingFlags.NonPublic)!;
+        var settings = new AppSettings { Fps = 60, EncodingQuality = "Quality", AutoVideoBitrate = true };
+        object? Key(string? file = null, AppSettings? options = null, DisplaySource? monitor = null) => method.Invoke(null, [file ?? executable, options ?? settings, monitor ?? display]);
+        var original = Key();
+        Check(original is not null && original.Equals(Key(monitor: display with { Name = "Renamed monitor" })),
+            "Encoder preference identity ignores harmless display label changes");
+        foreach (var changed in new[]
+        {
+            display with { Id = "different" }, display with { AdapterIndex = 1 }, display with { OutputIndex = 1 },
+            display with { X = 100 }, display with { Y = 100 }, display with { Width = 2560 }, display with { Height = 1440 }
+        })
+            Check(!original!.Equals(Key(monitor: changed)), "Changed native display identity or topology invalidates the encoder preference");
+        var changedSettings = settings.Clone(); changedSettings.Fps = 30;
+        Check(!original!.Equals(Key(options: changedSettings)), "Changed recording cadence requires a fresh normal encoder choice");
+        changedSettings = settings.Clone(); changedSettings.EncodingQuality = "Efficiency";
+        Check(!original.Equals(Key(options: changedSettings)), "Changed encoder quality invalidates the preferred configuration");
+        changedSettings = settings.Clone(); changedSettings.AutoVideoBitrate = false; changedSettings.VideoBitrateKbps = 5000;
+        Check(!original.Equals(Key(options: changedSettings)), "Changed resolved bitrate invalidates the preferred configuration");
+        var otherPath = Path.Combine(scratch, "another-identity.exe"); File.Copy(executable, otherPath);
+        Check(!original.Equals(Key(otherPath)), "A different FFmpeg path cannot reuse another executable's preference");
+        File.SetLastWriteTimeUtc(executable, File.GetLastWriteTimeUtc(executable).AddSeconds(10));
+        Check(!original.Equals(Key()), "Replacing the FFmpeg timestamp invalidates the in-memory preference");
+        var beforeLength = Key(); File.AppendAllText(executable, " changed");
+        Check(!beforeLength!.Equals(Key()), "Changing the FFmpeg size invalidates its preference");
+        Check(Key(Path.Combine(scratch, "missing-identity.exe")) is null, "Missing executable metadata disables the optional preference safely");
+    }
+
+    private static async Task CheckEncoderPreferenceAsync(string executable, DisplaySource display, string log)
+    {
+        var method = typeof(Recorder).GetMethod("SelectEncoderAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var settings = new AppSettings { EncoderMode = "Auto", AllowSoftwareEncoding = false, AudioEnabled = false };
+        void Configure(params (string Codec, string Result)[] results)
+        {
+            File.Delete(log); File.Delete(log + ".probe-order");
+            File.WriteAllText(log + ".probe-results.json", JsonSerializer.Serialize(results.ToDictionary(item => item.Codec, item => item.Result)));
+        }
+        string[] Order() => File.Exists(log + ".probe-order") ? File.ReadAllLines(log + ".probe-order") : [];
+        async Task<string> Select(Recorder recorder, AppSettings? options = null, CancellationToken token = default)
+        {
+            var task = (Task)method.Invoke(recorder, [executable, options ?? settings, display, token])!;
+            await task;
+            var result = task.GetType().GetProperty("Result")!.GetValue(task)!;
+            return (string)result.GetType().GetProperty("Codec")!.GetValue(result)!;
+        }
+        using var recorder = new Recorder();
+        Configure(("h264_amf", "success"));
+        Check(await Select(recorder) == "h264_amf" && Order().SequenceEqual(["h264_nvenc", "h264_amf"]),
+            "A cold automatic start probes normal hardware candidates until one succeeds");
+        Configure(("h264_amf", "success"));
+        Check(await Select(recorder) == "h264_amf" && Order().SequenceEqual(["h264_amf"]),
+            "A subsequent start freshly probes the proven hardware first without repeating unavailable GPUs");
+        Configure(("h264_nvenc", "success"));
+        Check(await Select(recorder) == "h264_nvenc" && Order().SequenceEqual(["h264_amf", "h264_nvenc"]),
+            "A failed preferred probe is invalidated before the normal remaining candidates are tried once");
+        Configure(("h264_qsv", "success"));
+        Check(await Select(recorder) == "h264_qsv" && Order().SequenceEqual(["h264_nvenc", "h264_amf", "h264_qsv"]),
+            "Fallback probing never repeats a failed preferred candidate");
+        var explicitNvidia = settings.Clone(); explicitNvidia.EncoderMode = "NVIDIA";
+        Configure(("h264_qsv", "success"));
+        try { await Select(recorder, explicitNvidia); throw new Exception("Explicit encoder unexpectedly fell back."); }
+        catch (InvalidOperationException)
+        { Check(Order().SequenceEqual(["h264_nvenc"]), "An explicit encoder ignores cached alternatives and never silently changes vendor"); }
+        Configure(("libx264", "success"));
+        try { await Select(recorder); throw new Exception("Automatic software unexpectedly allowed."); }
+        catch (InvalidOperationException)
+        { Check(!Order().Contains("libx264"), "Hardware failure never enters software encoding without explicit permission"); }
+        var software = settings.Clone(); software.EncoderMode = "Software";
+        Configure(("libx264", "success"));
+        Check(await Select(recorder, software) == "libx264" && Order().SequenceEqual(["libx264"]),
+            "Explicit software selection is a deliberate CPU choice and ignores hardware preferences");
+        var allowed = settings.Clone(); allowed.AllowSoftwareEncoding = true;
+        Configure(("libx264", "success"));
+        Check(await Select(recorder, allowed) == "libx264" && Order().SequenceEqual(["h264_nvenc", "h264_amf", "h264_qsv", "libx264"]),
+            "Optional CPU fallback remains last after all fresh hardware probes fail");
+        Configure(("h264_amf", "success"), ("libx264", "success"));
+        Check(await Select(recorder) == "h264_amf" && Order().SequenceEqual(["h264_nvenc", "h264_amf"]),
+            "A software fallback is never retained as the preferred automatic encoder");
+        var lowerFps = settings.Clone(); lowerFps.Fps = 30;
+        Configure(("h264_amf", "success"));
+        Check(await Select(recorder, lowerFps) == "h264_amf" && Order().SequenceEqual(["h264_nvenc", "h264_amf"]),
+            "Changed capture settings begin a normal fresh hardware selection");
+        Configure(("h264_amf", "wait"));
+        using (var cancellation = new CancellationTokenSource())
+        {
+            var pending = Select(recorder, lowerFps, cancellation.Token);
+            var pid = await WaitForPidAsync(log); cancellation.Cancel(); await ExpectCancellationAsync(pending);
+            Check(Order().SequenceEqual(["h264_amf"]) && !IsRunning(pid), "Cancelling a preferred hardware probe terminates it without trying other candidates");
+        }
+        Configure(("h264_amf", "success"));
+        Check(await Select(recorder, lowerFps) == "h264_amf" && Order().SequenceEqual(["h264_amf"]),
+            "Cancellation does not discard a previously proven hardware preference");
+        File.Delete(log); File.Delete(log + ".probe-order"); File.Delete(log + ".probe-results.json");
+    }
+
+    private static async Task CheckBeforeCaptureAsync(string scratch, DisplaySource display, string log)
+    {
+        IReadOnlyList<DisplaySource> currentDisplays = [display];
+        Recorder Create() => (Recorder)Activator.CreateInstance(typeof(Recorder), BindingFlags.Instance | BindingFlags.NonPublic,
+            null, [new Func<IReadOnlyList<DisplaySource>>(() => currentDisplays)], CultureInfo.InvariantCulture)!;
+        var directory = Path.Combine(scratch, "capture-gate");
+        var settings = new AppSettings { RecordingDirectory = directory, AudioEnabled = false, MicrophoneEnabled = false, EncoderMode = "Auto" };
+        File.WriteAllText(log + ".probe-results.json", "{\"h264_nvenc\":\"success\"}");
+        bool BeforeResources(Recorder recorder) => recorder.SessionPrefix is null && recorder.ProcessId is null
+            && new[] { "_audio", "_microphone", "_process" }.All(name => typeof(Recorder).GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(recorder) is null)
+            && !Directory.EnumerateFiles(directory).Any();
+        using (var recorder = Create())
+        {
+            int calls = 0; bool cleanBoundary = false;
+            try
+            {
+                await recorder.StartAsync(settings, display, "rejected", beforeCapture: token =>
+                { calls++; cleanBoundary = BeforeResources(recorder) && token.CanBeCanceled; throw new InvalidOperationException("Synthetic capture permission rejected"); });
+                throw new Exception("Rejected capture callback unexpectedly started recording.");
+            }
+            catch (InvalidOperationException ex) when (ex.Message == "Synthetic capture permission rejected") { }
+            Check(calls == 1 && cleanBoundary && BeforeResources(recorder) && !recorder.Status.Recording,
+                "The real StartAsync reaches a rejecting gate after a successful synthetic probe and before session, audio, capture process or output");
+        }
+        using (var recorder = Create())
+        using (var cancellation = new CancellationTokenSource())
+        {
+            bool called = false;
+            await ExpectCancellationAsync(recorder.StartAsync(settings, display, "cancelled_after_gate", cancellation.Token, token =>
+            { called = true; cancellation.Cancel(); return Task.CompletedTask; }));
+            Check(called && BeforeResources(recorder), "Cancellation is rechecked after a successful capture gate before resources are created");
+        }
+        using (var recorder = Create())
+        {
+            bool called = false;
+            await ExpectIOExceptionAsync(recorder.StartAsync(settings, display, "changed_display_at_gate", beforeCapture: token =>
+            { called = true; currentDisplays = [display with { Width = 2560 }]; return Task.CompletedTask; }));
+            Check(called && BeforeResources(recorder), "A display changed during the final asynchronous gate is rejected before recording resources or output");
+            currentDisplays = [display];
+        }
+        using (var recorder = Create())
+        {
+            var entered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var starting = recorder.StartAsync(settings, display, "stopped_at_gate", beforeCapture: async token =>
+            { entered.TrySetResult(true); await Task.Delay(Timeout.InfiniteTimeSpan, token); });
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var stopping = recorder.StopAsync();
+            await ExpectCancellationAsync(starting); await stopping.WaitAsync(TimeSpan.FromSeconds(5));
+            Check(BeforeResources(recorder), "Stop cancels a pending final capture gate without creating any recording resources");
+        }
+        File.Delete(log); File.Delete(log + ".probe-order"); File.Delete(log + ".probe-results.json");
+    }
+
+    private static async Task CheckProgressAsync(string apphost, string log)
+    {
+        using var recorder = new Recorder();
+        using var process = StartFake(apphost, "progress", log, redirectOutput: true);
+        typeof(Recorder).GetField("_process", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(recorder, process);
+        var updates = new List<RecorderStatus>();
+        recorder.Changed += status => { updates.Add(status); if (updates.Count == 1) File.WriteAllText(log + ".progress-release", "ready"); };
+        var firstFrame = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var read = (Task)typeof(Recorder).GetMethod("ReadProgressAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(recorder, [process, "Synthetic hardware", DateTime.UtcNow, firstFrame, 60])!;
+        await read; await process.WaitForExitAsync();
+        Check(firstFrame.Task.IsCompletedSuccessfully && updates.Count == 3 && updates.All(status => double.IsFinite(status.Fps) && status.Fps is >= 0 and <= 60),
+            "Fake FFmpeg progress keeps startup, invalid averages and counter resets finite without capture devices");
+        Check(updates[1].Fps > 0 && updates[1].VideoElapsed == TimeSpan.FromSeconds(1.5)
+            && updates[^1].Frames == 2 && updates[^1].Fps == 0 && updates[^1].VideoElapsed == TimeSpan.Zero,
+            "Progress parsing reports recent delivery while preserving bounded media time and reset frames");
+        File.Delete(log);
+        File.Delete(log + ".progress-release");
+    }
+
+    private static Process StartFake(string apphost, string mode, string log, bool redirectOutput = false)
+    {
+        var start = new ProcessStartInfo(apphost) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardOutput = redirectOutput };
         start.ArgumentList.Add("--fake-ffmpeg");
         start.ArgumentList.Add(mode);
         start.ArgumentList.Add(log);

@@ -27,6 +27,7 @@ public sealed partial class MainForm
         _autoVideoBitrate.CheckedChanged += (_, _) => { _customBitrate.Enabled = !_autoVideoBitrate.Checked; CustomQualityChanged(); };
         _display.SelectedIndexChanged += (_, _) => UpdateEstimates();
         _audioEnabled.CheckedChanged += (_, _) => UpdateEstimates();
+        _microphoneEnabled.CheckedChanged += (_, _) => UpdateEstimates();
         _tips.SetToolTip(_autoVideoBitrate, "Verwendet die tatsächliche Monitorauflösung. Sehr hohe Qualität: ungefähr 33,5 Mbit/s bei 1080p60, 55 Mbit/s bei 1440p60 und höchstens 100 Mbit/s bei 4K60.");
     }
 
@@ -73,7 +74,8 @@ public sealed partial class MainForm
         if (_loadingSettings) return;
         var draft = _controller.Settings.Clone();
         draft.Fps = (int)_customFps.Value; draft.VideoBitrateKbps = (int)_customBitrate.Value;
-        draft.AudioEnabled = _audioEnabled.Checked; draft.MaxStorageGb = (int)_maxStorage.Value; draft.RetentionDays = (int)_retention.Value;
+        draft.AudioEnabled = _audioEnabled.Checked; draft.MicrophoneEnabled = _microphoneEnabled.Checked;
+        draft.MaxStorageGb = (int)_maxStorage.Value; draft.RetentionDays = (int)_retention.Value;
         ReadQualitySettings(draft);
         var display = _display.SelectedItem as DisplaySource;
         if (display is { Width: > 0, Height: > 0 })
@@ -84,6 +86,33 @@ public sealed partial class MainForm
             _quotaEstimate.Text = $"Das Limit reicht ungefähr für {FormatHours(estimate.HoursAtLimit)} Aufnahme.\n{draft.RetentionDays} Tage gelten zusätzlich; hohe Qualität füllt den Speicher früher.";
             _quotaEstimate.ForeColor = estimate.FullRetentionFits ? Cyan : Amber;
         }
-        else { _qualityEstimate.Text = "Wähle einen verbundenen Bildschirm für die Qualitäts- und Speicherberechnung."; }
+        else
+        {
+            _qualityEstimate.Text = "Wähle einen verbundenen Bildschirm für die Qualitäts- und Speicherberechnung.";
+            _quotaEstimate.Text = "Die Speicherdauer wird mit einem verbundenen Bildschirm berechnet.";
+            _quotaEstimate.ForeColor = Muted;
+        }
+    }
+
+    private void UpdateDashboardQuality(DashboardStatus status, AppSettings settings, DisplaySource? display, string audioSummary)
+    {
+        string fileMode = settings.SingleFile ? "Eine durchgehende Datei" : $"{settings.SegmentMinutes} Min. pro Abschnitt";
+        string quality = display is { Width: > 0, Height: > 0 }
+            ? $"{display.Width} × {display.Height} · {settings.Fps} FPS · {RecordingQuality.ResolveBitrateKbps(settings, display) / 1000d:0.0} Mbit/s Ziel"
+            : "Kein Bildschirm verbunden";
+        _source.Text = $"{quality}   ·   {audioSummary}";
+        string sourceDetail = $"Gespeichertes Setup: {display?.Name ?? "Kein Bildschirm verbunden"}\n{quality}\n{audioSummary} · {fileMode}\n{(settings.AutoVideoBitrate ? "Automatische" : "Manuelle")} Zielbitrate; die tatsächliche Dateigröße hängt von Bewegung und Encoder ab.";
+        _tips.SetToolTip(_source, sourceDetail);
+        _source.AccessibleName = "Gespeicherte Aufnahmequalität und Quelle";
+        _source.AccessibleDescription = sourceDetail;
+
+        _fps.Text = status.Paused ? "—" : $"{(status.Recording ? status.Fps : settings.Fps):0.#} FPS";
+        _fpsDetail.Text = $"{(status.Paused ? "Pausiert · " : status.Recording ? "Aktuell · " : "")}Ziel: {settings.Fps} FPS";
+        string frameDetail = status.Paused
+            ? $"Die Aufnahme ist pausiert. Gespeichertes Ziel: {settings.Fps} FPS."
+            : status.Recording ? $"Aktuell gemessene Bildrate: {status.Fps:0.#} FPS. Gespeichertes Ziel: {settings.Fps} FPS."
+            : $"Gespeichertes Ziel: {settings.Fps} FPS. Die aktuelle Bildrate wird erst während einer Aufnahme gemessen.";
+        _tips.SetToolTip(_fps, frameDetail); _tips.SetToolTip(_fpsDetail, frameDetail);
+        _fps.AccessibleDescription = frameDetail; _fpsDetail.AccessibleDescription = frameDetail;
     }
 }
