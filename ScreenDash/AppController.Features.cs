@@ -15,6 +15,7 @@ public sealed partial class AppController
     private bool _gameRecordingOwned;
     private long? _gameExitCounter, _silentSinceCounter;
     private string _silenceWarning = "";
+    private string _gameDetectionMessage = "Warte auf ein ausgewähltes Spiel im Vordergrund.";
     public IReadOnlyList<AudioSource> Microphones => _microphones;
 
     public async Task AddBookmarkAsync(string label = "")
@@ -134,11 +135,15 @@ public sealed partial class AppController
         try
         {
             var settings = _settings.Clone(); long stopRequest = Interlocked.Read(ref _stopRequests);
+            if (!settings.GameDetectionEnabled) return;
             var result = await Task.Run(() => _gameDetection.Evaluate(settings.GameExecutables), _lifetime.Token);
             if (!await _gate.WaitAsync(0, _lifetime.Token)) return;
             try
             {
                 if (!_settings.GameDetectionEnabled || !settings.GameExecutables.SequenceEqual(_settings.GameExecutables) || stopRequest != Interlocked.Read(ref _stopRequests) || _busy) return;
+                _gameDetectionMessage = result.Diagnostic;
+                // A failed snapshot must not count toward the ten-second confirmed-exit grace.
+                if (!result.SnapshotReliable) { _gameExitCounter = null; return; }
                 if (result.HasGames) _gameExitCounter = null;
                 if (result.ShouldStart && !_session.Armed && !_recordStatus.Recording && !_locked && !_suspended)
                 {

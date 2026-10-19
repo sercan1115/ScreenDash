@@ -7,11 +7,11 @@ namespace ScreenDash;
 /// <summary>Desktop Duplication + hardware H.264, Matroska, and bounded optional WASAPI audio sources.</summary>
 public sealed class Recorder : IDisposable
 {
-    private sealed record Encoder(string Name, string Codec, string VideoFilters, string[] Options);
-    private static readonly Encoder Nvenc = new("NVIDIA NVENC", "h264_nvenc", "", ["-preset", "p1", "-tune", "ll", "-rc", "vbr"]);
-    private static readonly Encoder Amf = new("AMD AMF", "h264_amf", "", ["-usage", "lowlatency", "-quality", "speed", "-rc", "vbr_peak"]);
-    private static readonly Encoder Qsv = new("Intel Quick Sync", "h264_qsv", ",hwmap=derive_device=qsv,format=qsv,vpp_qsv=format=nv12", ["-preset", "veryfast"]);
-    private static readonly Encoder Software = new("CPU · Software", "libx264", ",hwdownload,format=bgra,format=yuv420p", ["-preset", "ultrafast", "-tune", "zerolatency", "-threads", "2"]);
+    private sealed record Encoder(string Name, string Codec, string VideoFilters);
+    private static readonly Encoder Nvenc = new("NVIDIA NVENC", "h264_nvenc", "");
+    private static readonly Encoder Amf = new("AMD AMF", "h264_amf", "");
+    private static readonly Encoder Qsv = new("Intel Quick Sync", "h264_qsv", ",hwmap=derive_device=qsv,format=qsv,vpp_qsv=format=nv12");
+    private static readonly Encoder Software = new("CPU · Software", "libx264", ",hwdownload,format=bgra,format=yuv420p");
     private readonly SemaphoreSlim _lifecycle = new(1, 1);
     private readonly object _errorLock = new();
     private readonly Queue<string> _stderr = new();
@@ -259,8 +259,10 @@ public sealed class Recorder : IDisposable
             args.AddRange(["-map", "[sound]", "-c:a", "aac", "-b:a", "128k", "-ac", "2", "-ar", "48000"]);
         else args.Add("-an");
         args.AddRange(["-c:v", encoder.Codec]);
-        args.AddRange(encoder.Options);
-        args.AddRange(["-b:v", $"{s.VideoBitrateKbps}k", "-maxrate", $"{s.VideoBitrateKbps}k", "-bufsize", $"{s.VideoBitrateKbps * 2}k",
+        args.AddRange(BuildEncoderOptions(encoder.Codec, s.EncodingQuality));
+        var bitrate = RecordingQuality.ResolveBitrateKbps(s, display);
+        var peakBitrate = RecordingQuality.PeakBitrateKbps(bitrate);
+        args.AddRange(["-profile:v", "high", "-b:v", $"{bitrate}k", "-maxrate", $"{peakBitrate}k", "-bufsize", $"{peakBitrate * 2}k",
             "-g", (s.Fps * 2).ToString(CultureInfo.InvariantCulture), "-bf", "0", "-enc_time_base:v", "filter",
             "-fps_mode", "passthrough"]);
         if (probe) args.AddRange(["-frames:v", "4", "-f", "null", "-"]);
@@ -276,6 +278,25 @@ public sealed class Recorder : IDisposable
                 Path.Combine(s.RecordingDirectory, prefix + "_%06d.mkv")]);
         }
         return args;
+    }
+
+    private static string[] BuildEncoderOptions(string codec, string quality)
+    {
+        var mode = RecordingQuality.NormalizeQuality(quality);
+        return codec switch
+        {
+            // Single pass and no lookahead keep the default hardware path inexpensive.
+            // Moving beyond the fastest preset preserves detail without downloading GPU frames.
+            "h264_nvenc" => ["-preset", mode switch { "Efficiency" => "p2", "Quality" => "p5", _ => "p4" },
+                "-tune", mode == "Efficiency" ? "ll" : "hq", "-rc", "vbr", "-multipass", "disabled", "-rc-lookahead", "0"],
+            "h264_amf" => ["-usage", "transcoding", "-quality", mode switch { "Efficiency" => "speed", "Quality" => "quality", _ => "balanced" },
+                "-rc", "vbr_peak", "-preanalysis", "0"],
+            "h264_qsv" => ["-preset", mode switch { "Efficiency" => "veryfast", "Quality" => "fast", _ => "faster" },
+                "-look_ahead", "0"],
+            "libx264" => ["-preset", mode switch { "Efficiency" => "ultrafast", "Quality" => "veryfast", _ => "superfast" },
+                "-tune", "zerolatency", "-threads", "2"],
+            _ => throw new ArgumentException("Unbekannter Video-Encoder.", nameof(codec))
+        };
     }
 
     private static string BuildAudioFilterGraph(bool systemAudio, bool microphone, int systemGain, int microphoneGain)
@@ -614,8 +635,9 @@ public sealed class Recorder : IDisposable
     }
     private static void Validate(AppSettings s, DisplaySource display, string prefix)
     {
-        if (s.Fps is < 1 or > 60 || s.VideoBitrateKbps is < 250 or > 100000 || s.SegmentMinutes is < 1 or > 60)
+        if (s.Fps is < 1 or > 60 || s.VideoBitrateKbps is < 500 or > RecordingQuality.MaximumBitrateKbps || s.SegmentMinutes is < 1 or > 60)
             throw new ArgumentException("Ungültige Bildrate, Bitrate oder Segmentlänge.");
+        _ = RecordingQuality.NormalizeQuality(s.EncodingQuality);
         if (s.SystemGainPercent is < 0 or > 200 || s.MicrophoneGainPercent is < 0 or > 200)
             throw new ArgumentException("Audiolautstärke muss zwischen 0 und 200 % liegen.");
         if (display.AdapterIndex < 0 || display.OutputIndex < 0 || display.Width <= 0 || display.Height <= 0)

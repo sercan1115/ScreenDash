@@ -15,6 +15,11 @@ if (Process.GetCurrentProcess().ProcessName.Equals("ffmpeg", StringComparison.Or
 if (args.Length > 0 && args[0] == "--process-checks") return await ProcessRegression.RunAsync();
 if (args.Length > 0 && args[0] == "--audio-checks") return await AudioChecks.RunAsync();
 if (args.Length > 0 && args[0] == "--audio-integration") return await AudioChecks.RunIntegrationAsync();
+if (args.Length > 0 && args[0] == "--quality-integration")
+{
+    if (args.Length != 2) { Console.Error.WriteLine("Usage: --quality-integration <path to a real ffmpeg.exe>"); return 2; }
+    return await QualityChecks.RunIntegrationAsync(args[1]);
+}
 
 var directory = Path.GetFullPath(args.Length > 0 ? args[0] : Path.Combine("work", "segments"));
 var shortTest = args.Length > 1 && args[1] == "short";

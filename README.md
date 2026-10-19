@@ -2,22 +2,23 @@
 
 Eine lokale Bildschirm-Dashcam für **Windows 10/11 (64 Bit)**. ScreenDash zeichnet einen ausgewählten Monitor mit Systemton auf, speichert eine durchgehende Datei je Aufnahme und räumt alte Aufnahmen automatisch auf.
 
-**[Windows-Version herunterladen](https://github.com/sercan1115/ScreenDash/releases/latest)** · [Anleitung](README.de.md) · [Neuerungen in 1.6.1](NEU-IN-1.6.1.de.md)
+**[Windows-Version herunterladen](https://github.com/sercan1115/ScreenDash/releases/latest)** · [Anleitung](README.de.md) · [Neuerungen in 1.7.0](NEU-IN-1.7.0.de.md)
 
 ![ScreenDash – Aufnahmeübersicht mit Beispieldaten](docs/screenshots/dashboard.png)
 
 Die Bilder zeigen die Oberfläche mit Beispieldaten. Ihre Auslastungsanzeigen sind keine Messwerte.
 
-![Weiche Seiten- und Bedienanimationen – native Vorschau mit Beispieldaten](docs/screenshots/interactions.gif)
+![Bewegte Silberlandschaft – vollständiger Zyklus mit Beispieldaten](docs/screenshots/background.gif)
 
 ## Funktionen
 
 - **Fenster und Desktop-Symbol:** sichtbar starten, beim Minimieren in der Taskleiste bleiben und per Doppelklick wieder öffnen. Die eigene Desktop-Verknüpfung wird beim Start angelegt und nach einem Update angepasst.
-- **Lebendiges Schwarz und Silber:** langsam wandernde silberne Konturen im Hintergrund, dunkle Karten, metallische Schaltflächen und große Serifenschrift. Die Hintergrundbewegung lässt sich abschalten und pausiert bei minimiertem oder verstecktem Fenster; Windows-Einstellungen für reduzierte Bewegung werden berücksichtigt.
+- **Sehr hohe Videoqualität:** 60 FPS in nativer Monitorauflösung, H.264 High und hochwertige GPU-Kodierung. Automatische Bitrate: ungefähr 33,5 Mbit/s bei 1080p60, 55 Mbit/s bei 1440p60 und bis zu 100 Mbit/s bei 4K60. Sparprofile und manuelle Einstellungen bleiben verfügbar.
+- **Lebendiges Schwarz und Silber:** gefüllte, langsam wandernde Silberbänder mit Lichtkanten im Hintergrund, dunkle Karten, metallische Schaltflächen und große Serifenschrift. Die Hintergrundbewegung lässt sich abschalten und pausiert bei minimiertem oder verstecktem Fenster; Windows-Einstellungen für reduzierte Bewegung werden berücksichtigt.
 - **Weiche Bedienanimationen:** sanfte Seiten- und Reiterübergänge, Hover, Fokus und Druckeffekte. Klickflächen bleiben stabil; jede Eingabe wird sofort verarbeitet. Hintergrund bis zu 25 FPS, Bedienanimationen nur für einen kurzen Übergang.
 - **Klarere Bedienung:** korrekte Audio- und Encoderanzeigen, sichtbare offene Einstellungen, erklärte Archivaktionen und zugängliche Eingabefelder.
 - **Lesezeichen:** während der Aufnahme Momente markieren, die ganze Datei schützen und später Clips davor/danach exportieren.
-- **Spielerkennung:** bei ausgewählten Spielen automatisch starten/stoppen; manuelles Stoppen wird respektiert. Anfangs ausgeschaltet.
+- **Spielerkennung:** erst starten, wenn die ausgewählte Spiel-EXE ein sichtbares Fenster im Vordergrund hat. Launcher lösen keinen Start aus. Bei aktiver Spielerkennung entfällt der separate Aufnahmestart beim Programmstart; Alt-Tab unterbricht eine laufende Aufnahme nicht. Manuelles Stoppen wird respektiert. Anfangs ausgeschaltet.
 - **Aufnahmeprofile:** eigene Bildschirm-/Audio-/Qualitätseinstellungen speichern, ohne Speicherregeln oder Autostart zu verändern.
 - **Tonwarnungen und Mikrofon:** fehlenden Spielton anzeigen; optional Stimme und Systemton mit getrennten Lautstärken in einer gemeinsamen Tonspur aufnehmen.
 - **Manuelle Updates:** GitHub prüfen, Download abbrechen, SHA256 prüfen und zur neuen portablen EXE wechseln. Einstellungen und Aufnahmen bleiben erhalten.
@@ -38,6 +39,8 @@ Die Bilder zeigen die Oberfläche mit Beispieldaten. Ihre Auslastungsanzeigen si
 - **MP4-Export:** abgeschlossene MKV-Aufnahmen ohne Neukodierung exportieren. Das Original bleibt erhalten; Export ist abbrechbar und Aufnahmebuttons bleiben verfügbar.
 - **Tray und Tastenkürzel:** im Hintergrund bedienen; Windows-Autostart und Aufnahme beim Programmstart sind optional.
 - **Lokale Speicherung:** Videos, Einstellungen und Protokolle bleiben auf dem PC. Die App lädt keine Aufnahmen hoch.
+
+![ScreenDash – sehr hohe Qualität und Speicherberechnung mit Beispieldaten](docs/screenshots/quality.png)
 
 ![ScreenDash – Archiv mit Beispieldaten](docs/screenshots/archive.png)
 
@@ -69,11 +72,11 @@ Die derzeit veröffentlichte EXE ist **nicht digital signiert**; Windows-SmartSc
 
 ## Auf geringe Belastung ausgelegt
 
-ScreenDash nutzt DirectX Desktop Duplication und prüft beim Start einen Hardware-Encoder: NVIDIA NVENC, AMD AMF oder Intel Quick Sync. Das Standardprofil verwendet **15 FPS und etwa 3 Mbit/s**. Ein Ultrasparprofil mit 10 FPS und individuelle Einstellungen sind ebenfalls verfügbar. CPU-Encoding muss ausdrücklich erlaubt werden.
+ScreenDash nutzt DirectX Desktop Duplication und prüft beim Start einen Hardware-Encoder: NVIDIA NVENC, AMD AMF oder Intel Quick Sync. Neue Einstellungen verwenden **Sehr hohe Qualität mit 60 FPS und automatischer Bitrate passend zur Monitorauflösung**. Bestehende manuelle Bitraten bleiben beim Update erhalten; das neue Profil lässt sich unter Einstellungen → Qualität auswählen und speichern. Sparprofile mit 10 oder 15 FPS und individuelle Einstellungen sind ebenfalls verfügbar. CPU-Encoding muss ausdrücklich erlaubt werden.
 
 Eine laufende Videovorschau entfällt; Audio verwendet einen begrenzten Puffer und FFmpeg läuft mit niedriger Prozesspriorität. Aufnahme und Dateischreiben benötigen dennoch CPU, GPU und Speicherbandbreite. Der kurze AMD-Test und seine Grenzen stehen im [Testbericht](TESTBERICHT.de.md); eine bestimmte Spieleleistung wird nicht zugesichert.
 
-Das Standardlimit von **50 GiB** reicht bei Daueraufnahme im Standardprofil ungefähr 35–38 Stunden. Für sieben volle Tage werden grob 240 GB benötigt. Geschützte Videos zählen zum Limit; reicht der Platz trotz Bereinigung nicht aus, stoppt die Aufnahme.
+Sehr hohe Qualität benötigt mehr Platz: grob **14,5 GiB/Stunde bei 1080p60**, **23,8 GiB/Stunde bei 1440p60** und **43,2 GiB/Stunde bei 4K60** einschließlich Ton und Containerreserve. Die tatsächliche Größe schwankt. Das Standardlimit von **50 GiB** reicht damit etwa 3,4 / 2,1 / 1,2 Stunden; die Oberfläche berechnet den Wert für den gewählten Monitor. Geschützte Videos zählen zum Limit; reicht der Platz trotz Bereinigung nicht aus, stoppt die Aufnahme.
 
 ## Quellcode bauen
 
@@ -85,7 +88,7 @@ cd ScreenDash
 .\build.ps1
 ```
 
-Das Skript führt 177 Funktionsprüfungen, 147 Oberfläche-/Animationsprüfungen mit künstlichen Daten, 20 isolierte Windows-Verknüpfungsprüfungen und 5 Signiervalidierungen aus. Es baut die portable App nach `dist`. GitHub Actions führt dieselben 349 Prüfungen auf Windows aus und erzeugt ein Build-Artefakt. Die Windows-Version steht in den Releases.
+Das Skript führt 263 Funktionsprüfungen, 221 Oberfläche-/Animationsprüfungen mit künstlichen Daten, 20 isolierte Windows-Verknüpfungsprüfungen und 5 Signiervalidierungen aus. Es baut die portable App nach `dist`. GitHub Actions führt dieselben 509 Prüfungen auf Windows aus und erzeugt ein Build-Artefakt. Die Windows-Version steht in den Releases.
 
 Zusätzliche Integrationstests benötigen einen interaktiven Windows-Desktop, einen Monitor, FFmpeg und gegebenenfalls ein Audiogerät. Sie zeichnen echte Bildschirminhalte auf und sind daher kein Bestandteil des CI-Laufs. Hinweise und Ergebnisse: [Testbericht](TESTBERICHT.de.md).
 

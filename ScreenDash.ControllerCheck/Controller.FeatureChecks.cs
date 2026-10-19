@@ -22,10 +22,12 @@ internal static class ControllerFeatureChecks
         }
         IReadOnlyList<GameProcess> running = [new("arena.exe", 123)];
         bool blockSnapshot = false;
+        bool failedSnapshot = false;
         using var snapshotEntered = new ManualResetEventSlim();
         using var snapshotRelease = new ManualResetEventSlim();
         var games = new GameDetection(() =>
         {
+            if (failedSnapshot) throw new IOException("Synthetic unavailable process query");
             if (blockSnapshot)
             {
                 snapshotEntered.Set();
@@ -78,6 +80,21 @@ internal static class ControllerFeatureChecks
                 "A manually armed session is not stopped by game detection when no game runs");
             session.Stop();
 
+            running = [new("arena.exe", 123, HasVisibleWindow: false, IsForeground: false)]; games.Reset();
+            await CheckGamesAsync();
+            Check(!session.Armed && recorder.ProcessId is null && Field("_pendingStart").GetValue(controller) is null,
+                "A selected game background worker never arms the controller or opens capture devices");
+            running = [new("arena.exe", 123, HasVisibleWindow: true, IsForeground: false)];
+            await CheckGamesAsync();
+            Check(!session.Armed && recorder.ProcessId is null,
+                "An inactive game window waits for foreground activation before automatic recording");
+            Settings(settings => settings.GameExecutables = ["steam.exe"]);
+            running = [new("steam.exe", 123)]; games.Reset();
+            await CheckGamesAsync();
+            Check(!session.Armed && recorder.ProcessId is null && Field("_gameDetectionMessage").GetValue(controller)!.ToString()!.Contains("Launcher"),
+                "A saved active Steam launcher cannot start capture and supplies an actionable explanation");
+            Settings(settings => settings.GameExecutables = ["arena.exe"]);
+
             Field("_locked").SetValue(controller, true);
             session.SetPrivacy(true, false, true);
             running = [new("arena.exe", 123)]; games.Reset();
@@ -112,7 +129,25 @@ internal static class ControllerFeatureChecks
             session.Start(); session.Pause(); games.MarkRecordingStarted(); Field("_gameRecordingOwned").SetValue(controller, true);
             await CheckGamesAsync();
             Check(session.Armed && session.ManualPaused && recorder.ProcessId is null, "A running game cannot undo an intentional pause of its automatic recording");
-            running = []; Field("_gameExitCounter").SetValue(controller, OldCounter());
+            running = [new("arena.exe", 123, HasVisibleWindow: true, IsForeground: false)];
+            Field("_gameExitCounter").SetValue(controller, OldCounter());
+            await CheckGamesAsync();
+            Check(session.Armed && session.ManualPaused && Field("_gameExitCounter").GetValue(controller) is null,
+                "Alt Tab preserves the automatically owned session and clears a pending exit grace period");
+            running = [new("arena.exe", 123, HasVisibleWindow: false, IsForeground: false)];
+            await CheckGamesAsync();
+            Check(session.Armed && session.ManualPaused && recorder.ProcessId is null,
+                "A still-running minimized game preserves recording intent without resuming a manual pause");
+            failedSnapshot = true; Field("_gameExitCounter").SetValue(controller, OldCounter());
+            await CheckGamesAsync();
+            Check(session.Armed && Field("_gameExitCounter").GetValue(controller) is null
+                && Field("_gameDetectionMessage").GetValue(controller)!.ToString()!.Contains("nicht verfügbar"),
+                "An unavailable game snapshot cannot stop a session and resets the confirmed-exit grace period");
+            failedSnapshot = false; running = [];
+            await CheckGamesAsync();
+            Check(session.Armed && Field("_gameExitCounter").GetValue(controller) is long,
+                "A confirmed game exit begins the ten-second grace period without immediately disarming capture");
+            Field("_gameExitCounter").SetValue(controller, OldCounter());
             await CheckGamesAsync();
             Check(!session.Armed && !controller.Status.Recording && controller.Status.Message.Contains("Spiel beendet"), "Game exit stops its owned paused session after the grace period");
 

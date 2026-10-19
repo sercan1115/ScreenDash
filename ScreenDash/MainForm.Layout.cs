@@ -24,7 +24,7 @@ public sealed partial class MainForm
         var bottom = Grid(1, 4); bottom.RowStyles.Add(new RowStyle(SizeType.Absolute, 37)); bottom.RowStyles.Add(new RowStyle(SizeType.Absolute, 37)); bottom.RowStyles.Add(new RowStyle(SizeType.Absolute, 42)); bottom.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         var folder = SidebarAction("Ordner öffnen", AppGlyph.Folder); folder.Click += (_, _) => RunSync(_controller.OpenRecordingFolder); bottom.Controls.Add(folder, 0, 0);
         var logs = SidebarAction("Diagnose", AppGlyph.Activity); logs.Click += (_, _) => RunSync(_controller.OpenLogs); bottom.Controls.Add(logs, 0, 1);
-        var privacy = new StatusPill { Text = "LOKAL GESPEICHERT", ForeColor = Cyan, Font = new Font("Segoe UI", 7.4f, FontStyle.Bold), Dock = DockStyle.Fill, Margin = new Padding(0, 5, 0, 7) }; bottom.Controls.Add(privacy, 0, 2); bottom.Controls.Add(TextLabel("Version 1.6.1  ·  Windows", 8, Muted), 0, 3); sideGrid.Controls.Add(bottom, 0, 3); shell.Controls.Add(sidebar, 0, 0);
+        var privacy = new StatusPill { Text = "LOKAL GESPEICHERT", ForeColor = Cyan, Font = new Font("Segoe UI", 7.4f, FontStyle.Bold), Dock = DockStyle.Fill, Margin = new Padding(0, 5, 0, 7) }; bottom.Controls.Add(privacy, 0, 2); bottom.Controls.Add(TextLabel("Version 1.7.0  ·  Windows", 8, Muted), 0, 3); sideGrid.Controls.Add(bottom, 0, 3); shell.Controls.Add(sidebar, 0, 0);
         var mainFrame = new Panel { Dock = DockStyle.Fill, BackColor = Canvas, Padding = new Padding(28, 23, 28, 12), Margin = Padding.Empty };
         var main = Grid(1, 3); main.BackColor = Canvas; main.RowStyles.Add(new RowStyle(SizeType.Absolute, 84)); main.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); main.RowStyles.Add(new RowStyle(SizeType.Absolute, 29)); mainFrame.Controls.Add(main);
         var leftArt = AmbientDecoration(Canvas, false); var rightArt = AmbientDecoration(Canvas, false); var topArt = AmbientDecoration(Canvas, false); var bottomArt = AmbientDecoration(Canvas, false);
@@ -41,7 +41,7 @@ public sealed partial class MainForm
         }
         mainFrame.SizeChanged += (_, _) => LayoutAmbientFrame(); mainFrame.PaddingChanged += (_, _) => LayoutAmbientFrame(); LayoutAmbientFrame();
         var headerSurface = new EditorialHeader { Dock = DockStyle.Fill, BackColor = Canvas, Margin = new Padding(0, 0, 0, 10) };
-        var header = Grid(3, 2); header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 104)); header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 184)); header.RowStyles.Add(new RowStyle(SizeType.Absolute, 47)); header.RowStyles.Add(new RowStyle(SizeType.Absolute, 26));
+        var header = Grid(3, 2); header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 208)); header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 184)); header.RowStyles.Add(new RowStyle(SizeType.Absolute, 47)); header.RowStyles.Add(new RowStyle(SizeType.Absolute, 26));
         _pageTitle.Font = new Font("Georgia", 29.5f, FontStyle.Italic); _pageTitle.ForeColor = Cyan;
         _pageSubtitle.Font = new Font("Segoe UI", 9.5f); _pageSubtitle.TextAlign = ContentAlignment.TopLeft;
         _headerState.Margin = new Padding(0, 7, 0, 7);
@@ -49,9 +49,9 @@ public sealed partial class MainForm
         var headerArt = AmbientDecoration(Canvas, true); headerArt.Dock = DockStyle.Fill; headerArt.Margin = new Padding(10, 0, 12, 1); header.Controls.Add(headerArt, 1, 0); header.SetRowSpan(headerArt, 2);
         header.SizeChanged += (_, _) =>
         {
-            bool showArt = header.ClientSize.Width >= 800 * DeviceDpi / 96;
+            bool showArt = header.ClientSize.Width >= 880 * DeviceDpi / 96;
             headerArt.Visible = showArt;
-            float width = showArt ? 104 * DeviceDpi / 96f : 0;
+            float width = showArt ? 208 * DeviceDpi / 96f : 0;
             if (header.ColumnStyles[1].Width != width) header.ColumnStyles[1].Width = width;
         };
         headerSurface.Controls.Add(header);
@@ -100,8 +100,8 @@ public sealed partial class MainForm
         metrics.Controls.Add(Metric("KODIERUNG", _encoder, _encoderDetail, false), 0, 0); metrics.Controls.Add(Metric("CPU", _cpu, "App + Encoder", false), 1, 0); metrics.Controls.Add(Metric("ARBEITSSPEICHER", _memory, "App + Encoder", false), 2, 0); metrics.Controls.Add(Metric("BILDRATE", _fps, "Bilder pro Sekunde", true), 3, 0); grid.Controls.Add(metrics, 0, 1);
         var storage = Surface(new Padding(22, 11, 22, 12)); var storageGrid = Grid(1, 5); storageGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 20)); storageGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 29)); storageGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 13)); storageGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 25)); storageGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         storageGrid.Controls.Add(TextLabel("02  /  SPEICHER & AUFBEWAHRUNG", 7.8f, Cyan, FontStyle.Bold), 0, 0); storageGrid.Controls.Add(_storage, 0, 1); storageGrid.Controls.Add(_storageMeter, 0, 2); storageGrid.Controls.Add(_storageDetail, 0, 3); storageGrid.Controls.Add(_storageEstimate, 0, 4); storage.Controls.Add(storageGrid); grid.Controls.Add(storage, 0, 2);
-        var shortcuts = Grid(2, 1); shortcuts.Padding = new Padding(2, 5, 2, 0); shortcuts.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 62)); shortcuts.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
-        var help = TextLabel("Ein Moment, den du behalten möchtest?\nLesezeichen markieren ihn und sichern die ganze Datei.", 9, Muted); help.TextAlign = ContentAlignment.TopLeft; shortcuts.Controls.Add(help, 0, 0);
-        var keyHints = TextLabel("Mit Strg + Alt:\nF9 Sichern · F10 Pause · F11 Lesezeichen", 9, Muted); keyHints.TextAlign = ContentAlignment.TopRight; shortcuts.Controls.Add(keyHints, 1, 0); grid.Controls.Add(shortcuts, 0, 3);
+        var shortcuts = Grid(2, 1); shortcuts.Padding = new Padding(2, 5, 2, 0); shortcuts.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 63)); shortcuts.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 37));
+        var help = TextLabel("Lesezeichen sichern die ganze Datei. Mit Strg + Alt:\nF9 Sichern · F10 Pause · F11 Lesezeichen", 8.8f, Muted); help.TextAlign = ContentAlignment.TopLeft; shortcuts.Controls.Add(help, 0, 0);
+        var landscape = AmbientDecoration(Canvas, true); landscape.Dock = DockStyle.Fill; landscape.Margin = new Padding(14, 0, 0, 0); shortcuts.Controls.Add(landscape, 1, 0); grid.Controls.Add(shortcuts, 0, 3);
     }
 }

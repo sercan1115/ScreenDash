@@ -47,6 +47,77 @@ Sync("Disabled or unconfigured game detection takes no process snapshot", () =>
     var detector = new GameDetection(() => { count++; return [new("game", 2)]; }, 2);
     Require(!detector.Evaluate([]).ShouldStart && count == 0, "Empty detection must be free of process enumeration.");
 });
+Sync("A selected background process cannot start a game recording", () =>
+{
+    IReadOnlyList<GameProcess> snapshot = [new("game", 2, HasVisibleWindow: false, IsForeground: true)];
+    var detector = new GameDetection(() => snapshot, 2);
+    var result = detector.Evaluate(["game"]);
+    Require(result.HasGames && !result.ShouldStart && result.Diagnostic.Contains("Hintergrund"), "A foreground helper without a real window must not count as a played game.");
+    snapshot = [new("game", 2, HasVisibleWindow: true, IsForeground: false)];
+    Require(!detector.Evaluate(["game"]).ShouldStart, "An open but inactive game window must wait for the user to activate it.");
+});
+Sync("A selected visible foreground game can start capture", () =>
+{
+    var detector = new GameDetection(() => [new("game", 2, HasVisibleWindow: true, IsForeground: true)], 2);
+    var result = detector.Evaluate(["game"]);
+    Require(result.ShouldStart && result.SnapshotReliable && result.Diagnostic.Contains("Vordergrund"), "The actual selected foreground game must start without a launcher match.");
+});
+Sync("Foreground and visibility must belong to the same game process", () =>
+{
+    var detector = new GameDetection(() => [new("game", 2, false, true, 11), new("game", 2, true, false, 12)], 2);
+    Require(!detector.Evaluate(["game"]).ShouldStart, "Two same-named workers must not combine their unrelated foreground and window flags.");
+});
+Sync("Known launcher selections never auto-start or enumerate all processes", () =>
+{
+    int snapshots = 0;
+    var detector = new GameDetection(() => { snapshots++; return [new("steam", 2), new("epicgameslauncher", 2)]; }, 2);
+    var result = detector.Evaluate(["Steam.exe", "epicgameslauncher"]);
+    Require(!result.ShouldStart && !result.HasGames && snapshots == 0 && result.Diagnostic.Contains("Launcher"), "Old saved launcher entries must remain safe even while the launcher is active.");
+    Require(GameDetection.IsExcludedExecutable("riotclientservices") && !GameDetection.IsExcludedExecutable("valorant-win64-shipping"), "The actual game executable must remain eligible.");
+});
+Sync("A selected launcher does not prevent the actual foreground game from starting", () =>
+{
+    var detector = new GameDetection(() => [new("steam", 2), new("game", 2)], 2);
+    var result = detector.Evaluate(["steam", "game"]);
+    Require(result.ShouldStart && result.RunningGames.SequenceEqual(["game.exe"]), "Only the selected game may trigger recording in a mixed old configuration.");
+});
+Sync("Explicit browser games remain available as user-selected foreground windows", () =>
+{
+    var detector = new GameDetection(() => [new("chrome", 2)], 2);
+    Require(detector.Evaluate(["chrome"]).ShouldStart && detector.GetRunningPrograms().Contains("chrome.exe"), "Window detection must not invent a blanket browser exclusion.");
+});
+Sync("Alt Tab and a minimized game cannot stop an automatically owned recording", () =>
+{
+    IReadOnlyList<GameProcess> snapshot = [new("game", 2)];
+    var detector = new GameDetection(() => snapshot, 2);
+    Require(detector.Evaluate(["game"]).ShouldStart, "The game must first qualify for an automatic start.");
+    detector.MarkRecordingStarted();
+    snapshot = [new("game", 2, true, false)];
+    Require(!detector.Evaluate(["game"]).ShouldStop, "Switching to another window must preserve the recording.");
+    snapshot = [new("game", 2, false, false)];
+    Require(!detector.Evaluate(["game"]).ShouldStop, "The still-running minimized game must preserve capture ownership.");
+    snapshot = [];
+    Require(detector.Evaluate(["game"]).ShouldStop, "Actual process exit must still request the owned recording to stop.");
+});
+Sync("Unknown game snapshots never stop capture or clear an explicit Stop", () =>
+{
+    bool unavailable = false;
+    IReadOnlyList<GameProcess> snapshot = [new("game", 2)];
+    var detector = new GameDetection(() => unavailable ? throw new IOException("Synthetic query failure") : snapshot, 2);
+    detector.MarkRecordingStarted(); unavailable = true;
+    var unknown = detector.Evaluate(["game"]);
+    Require(!unknown.SnapshotReliable && !unknown.ShouldStop && !unknown.ShouldStart, "An unavailable snapshot is unknown rather than an observed game exit.");
+    detector.MarkRecordingStopped(); detector.SuppressUntilGamesExit();
+    detector.Evaluate(["game"]); unavailable = false;
+    Require(!detector.Evaluate(["game"]).ShouldStart, "Query failure must preserve Stop suppression.");
+    snapshot = []; detector.Evaluate(["game"]); snapshot = [new("game", 2)];
+    Require(detector.Evaluate(["game"]).ShouldStart, "Only a confirmed exit may rearm the next game session.");
+});
+Sync("Program picker excludes background workers and known launchers", () =>
+{
+    var detector = new GameDetection(() => [new("steam", 2), new("game", 2), new("background", 2, false, false), new("other", 3)], 2);
+    Require(detector.GetRunningPrograms().SequenceEqual(["game.exe"]), "Picker suggestions must come from visible applications in this session, without launcher/helper clutter.");
+});
 Sync("Game detection stops only a recording that it started", () =>
 {
     IReadOnlyList<GameProcess> snapshot = [new("game", 2)];
@@ -119,7 +190,7 @@ Sync("Applying a capture profile preserves storage and automation settings", () 
 {
     var current = Settings();
     current.RetentionDays = 20; current.MaxStorageGb = 77; current.AutoStopMinutes = 30;
-    current.StartWithWindows = true; current.RecordOnLaunch = true; current.GameDetectionEnabled = true;
+    current.StartWithWindows = true; current.RecordOnLaunch = false; current.GameDetectionEnabled = true;
     current.GameExecutables = ["other.exe"];
     current.AnimatedBackground = false;
     var capture = Settings(); capture.Fps = 30; capture.VideoBitrateKbps = 6000; capture.DisplayId = "display";
@@ -129,7 +200,7 @@ Sync("Applying a capture profile preserves storage and automation settings", () 
     Require(result.Fps == 30 && result.VideoBitrateKbps == 6000 && result.DisplayId == "display" && result.AudioDeviceId == "headset"
         && result.MicrophoneEnabled && result.MicrophoneGainPercent == 150 && result.SystemGainPercent == 60 && !result.SingleFile && result.SegmentMinutes == 15, "Capture fields must apply.");
     Require(result.RecordingDirectory == current.RecordingDirectory && result.RetentionDays == 20 && result.MaxStorageGb == 77
-        && result.StartWithWindows && result.RecordOnLaunch && result.AutoStopMinutes == 30 && result.GameDetectionEnabled
+        && result.StartWithWindows && !result.RecordOnLaunch && result.AutoStopMinutes == 30 && result.GameDetectionEnabled
         && result.GameExecutables.SequenceEqual(["other.exe"]) && !result.AnimatedBackground, "A preset must never replace storage, automation or appearance preferences.");
     result.GameExecutables.Add("extra.exe");
     Require(current.GameExecutables.Count == 1, "Applying must deep-clone mutable settings.");
@@ -138,9 +209,53 @@ Sync("Loaded profiles and returned profiles cannot mutate the stored library", (
 {
     var library = new ProfileLibrary(Path.Combine(Folder(), "profiles.json"));
     var profile = library.Save("Game", Settings());
-    profile.Settings.Fps = 60;
+    profile.Settings.Fps = 30;
     var loaded = library.Load().Single(); loaded.Settings.GameExecutables.Add("game.exe");
-    Require(library.Load().Single().Settings.Fps == 15 && library.Load().Single().Settings.GameExecutables.Count == 0, "Returned data must be independent.");
+    Require(library.Load().Single().Settings.Fps == 60 && library.Load().Single().Settings.GameExecutables.Count == 0, "Returned data must be independent.");
+});
+Sync("Capture profiles round-trip automatic quality without changing storage or game automation", () =>
+{
+    var library = new ProfileLibrary(Path.Combine(Folder(), "profiles.json"));
+    var capture = Settings();
+    capture.Fps = 60; capture.VideoBitrateKbps = 90_000; capture.AutoVideoBitrate = true; capture.EncodingQuality = "Quality";
+    var profile = library.Save("Hohe Qualität", capture);
+    var current = Settings();
+    current.RecordingDirectory = Path.Combine(scratch, "keep-recordings"); current.RetentionDays = 14;
+    current.GameDetectionEnabled = true; current.GameExecutables = ["arena.exe"];
+    var applied = ProfileLibrary.Apply(current, library.Load().Single());
+    Require(applied.Fps == 60 && applied.VideoBitrateKbps == 90_000 && applied.AutoVideoBitrate && applied.EncodingQuality == "Quality",
+        "New quality mode and automatic bitrate must survive save, load and apply.");
+    Require(applied.RecordingDirectory == current.RecordingDirectory && applied.RetentionDays == 14
+        && applied.GameDetectionEnabled && !applied.RecordOnLaunch && applied.GameExecutables.SequenceEqual(["arena.exe"]),
+        "Applying better capture quality must preserve game-only automation and the current archive.");
+    capture.AutoVideoBitrate = false; capture.EncodingQuality = "Efficiency";
+    library.Save("Manuell", capture, profile.Id);
+    var manual = library.Load().Single().Settings;
+    Require(!manual.AutoVideoBitrate && manual.EncodingQuality == "Efficiency" && manual.VideoBitrateKbps == 90_000,
+        "An explicit manual bitrate must not be replaced by automatic recommendations.");
+});
+Sync("Legacy profile JSON preserves its explicit bitrate when automatic quality did not exist", () =>
+{
+    var path = Path.Combine(Folder(), "profiles.json"); Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+    var stored = new[] { new { Id = Guid.NewGuid().ToString("N"), Name = "Vorheriges Profil",
+        settings = new { RecordingDirectory = Path.Combine(scratch, "legacy-recordings"), Fps = 30, VideoBitrateKbps = 6_000 } } };
+    var original = JsonSerializer.Serialize(stored);
+    File.WriteAllText(path, original);
+    var library = new ProfileLibrary(path);
+    var loaded = library.Load().Single();
+    Require(loaded.Settings.Fps == 30 && loaded.Settings.VideoBitrateKbps == 6_000 && !loaded.Settings.AutoVideoBitrate,
+        "A saved old profile must keep its manual quality choices instead of silently increasing disk usage.");
+    var applied = ProfileLibrary.Apply(Settings(), loaded);
+    Require(!applied.AutoVideoBitrate && applied.VideoBitrateKbps == 6_000 && File.ReadAllText(path) == original,
+        "Reading and applying a legacy profile must not rewrite the original file.");
+});
+Sync("Game-only automation overrides a legacy record-on-launch flag when applying capture profiles", () =>
+{
+    var current = Settings();
+    current.GameDetectionEnabled = true; current.RecordOnLaunch = true; current.GameExecutables = ["arena.exe"];
+    var applied = ProfileLibrary.Apply(current, new(Guid.NewGuid().ToString("N"), "Quality", Settings()));
+    Require(applied.GameDetectionEnabled && !applied.RecordOnLaunch && applied.GameExecutables.SequenceEqual(["arena.exe"]),
+        "Changing video quality must not retain an old flag that starts capture without an active game.");
 });
 Sync("Malformed profile JSON is preserved without overwriting", () =>
 {

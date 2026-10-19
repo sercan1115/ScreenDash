@@ -144,7 +144,9 @@ static void FreeSpaceReserve()
     const long reserve = 2L * 1024 * 1024 * 1024;
     Check(!new RecordingStore(temp.Root, _ => reserve).Cleanup(settings, nowUtc: Now()).CanRecord, "The reserve itself cannot be consumed.");
     Check(!new RecordingStore(temp.Root, _ => reserve + 1024 * 1024).Cleanup(settings, nowUtc: Now()).CanRecord, "A small positive margin is insufficient for the next check interval.");
-    Check(new RecordingStore(temp.Root, _ => reserve + 64L * 1024 * 1024).Cleanup(settings, nowUtc: Now()).CanRecord, "Safe free-space headroom should allow recording.");
+    Check(!new RecordingStore(temp.Root, _ => reserve + 64L * 1024 * 1024).Cleanup(settings, nowUtc: Now()).CanRecord, "Unknown automatic bitrate reserves the maximum supported quality burst, exceeding the old small headroom.");
+    Check(new RecordingStore(temp.Root, _ => reserve + 256L * 1024 * 1024).Cleanup(settings, nowUtc: Now()).CanRecord, "Safe high-quality free-space headroom should allow recording.");
+    Check(new RecordingStore(temp.Root, _ => reserve + 64L * 1024 * 1024).Cleanup(settings, nowUtc: Now(), videoPeakBitrateKbps: 12_000).CanRecord, "A resolved lower capture peak can use a smaller safe interval buffer without assuming the maximum quality rate.");
 }
 
 static void ActiveSegment()

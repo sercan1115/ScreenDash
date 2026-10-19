@@ -28,7 +28,7 @@ internal static class Program
         using var controller = new PreviewController();
         using var form = new MainForm(controller, enableHotkeys: false);
         form.Icon = previewIcon;
-        form.Text = "ScreenDash 1.6.1 · Vorschau mit Beispieldaten";
+        form.Text = "ScreenDash 1.7.0 · Vorschau mit Beispieldaten";
         form.StartPosition = FormStartPosition.Manual;
         form.Location = new Point(-20000, -20000);
         form.ClientSize = new Size(1180, 780);
@@ -422,7 +422,7 @@ internal static class Program
         {
             Method = directPaintOnly ? "production-OnPaint-direct" : "native-DrawToBitmap",
             Description = directPaintOnly
-                ? "Synthetic off-screen idle benchmark invoking the real AmbientPanel.OnPaint method on persistent Graphics and Bitmap buffers. MethodInfo, PaintEventArgs and argument arrays are cached. Includes native GDI+ clear, pens and curves, excludes WinForms double-buffer blits, WM_PRINT and DrawToBitmap copies. No screen or audio recording and no game workload. This drawing-only sample is not an estimate of gaming performance."
+                ? "Synthetic off-screen idle benchmark invoking the real AmbientPanel.OnPaint method on persistent Graphics and Bitmap buffers. MethodInfo, PaintEventArgs and argument arrays are cached. Includes native GDI+ clearing and the production cached silver ribbon drawing resources; excludes WinForms double-buffer blits, WM_PRINT and DrawToBitmap copies. No screen or audio recording and no game workload. This drawing-only sample is not an estimate of gaming performance."
                 : "Synthetic off-screen WinForms idle benchmark with bounded ambient surfaces forced through DrawToBitmap on each background frame. Includes WM_PRINT and bitmap copying overhead; no full UI repaint, no screen or audio recording and no game workload. This is not an estimate of gaming performance.",
             LogicalProcessors = Environment.ProcessorCount, Dpi = form.DeviceDpi,
             BackgroundSurfaceCount = surfaces.Length, BackgroundPixelArea = backgroundPixelArea,
@@ -541,10 +541,17 @@ internal static class Program
         Call("ShowPage", 1);
         var profile = Field<ComboBox>("_profile"); profile.SelectedIndex = 0;
         var settings = (AppSettings)Call("ReadSettings")!;
-        Check(settings.Fps == 10 && settings.VideoBitrateKbps == 1500, "ultra sparing preset");
+        Check(settings.Fps == 10 && settings.VideoBitrateKbps == 2000 && !settings.AutoVideoBitrate && settings.EncodingQuality == "Efficiency", "ultra sparing preset explicitly retains its manual disk budget");
+        profile.SelectedIndex = 1; settings = (AppSettings)Call("ReadSettings")!;
+        Check(settings.Fps == 15 && settings.AutoVideoBitrate && settings.EncodingQuality == "Efficiency", "sparing preset selects adaptive efficient encoding");
+        profile.SelectedIndex = 2; settings = (AppSettings)Call("ReadSettings")!;
+        Check(settings.Fps == 30 && settings.AutoVideoBitrate && settings.EncodingQuality == "Balanced", "gaming preset balances native capture detail and encoder load");
+        profile.SelectedIndex = 3; settings = (AppSettings)Call("ReadSettings")!;
+        Check(settings.Fps == 60 && settings.AutoVideoBitrate && settings.EncodingQuality == "Quality", "very high quality preset selects sixty frames and adaptive quality encoding");
+        Field<CheckBox>("_autoVideoBitrate").Checked = false;
         Field<NumericUpDown>("_customFps").Value = 47; Field<NumericUpDown>("_customBitrate").Value = 8123;
         settings = (AppSettings)Call("ReadSettings")!;
-        Check(settings.Fps == 47 && settings.VideoBitrateKbps == 8123 && profile.SelectedIndex == 4, "custom quality round trip");
+        Check(settings.Fps == 47 && settings.VideoBitrateKbps == 8123 && !settings.AutoVideoBitrate && profile.SelectedIndex == 4, "custom manual quality round trip");
         Call("LoadSettings"); controller.Paused = true; Call("RefreshDashboard");
         Check(Field<Button>("_pause").Enabled && Field<Button>("_pause").Text.Contains("Fortsetzen"), "paused state exposes resume");
         controller.Paused = false; Call("RefreshDashboard");
@@ -593,7 +600,7 @@ internal static class Program
         controller.Settings.EncoderMode = "Auto"; controller.Encoder = ""; Call("RefreshDashboard");
         Check(Field<Label>("_encoderDetail").Text.Contains("Startprüfung"), "an unselected encoder does not claim hardware was already validated");
         controller.Encoder = savedEncoder; Call("LoadSettings"); Call("RefreshDashboard");
-        string[] namedSettings = ["_display", "_audio", "_directory", "_profile", "_encoderChoice", "_customFps", "_customBitrate", "_segment", "_retention", "_maxStorage", "_minFree", "_protectMinutes", "_autoStopMinutes", "_microphone", "_systemGain", "_microphoneGain", "_silenceSeconds"];
+        string[] namedSettings = ["_display", "_audio", "_directory", "_profile", "_encoderChoice", "_encodingQuality", "_autoVideoBitrate", "_customFps", "_customBitrate", "_segment", "_retention", "_maxStorage", "_minFree", "_protectMinutes", "_autoStopMinutes", "_microphone", "_systemGain", "_microphoneGain", "_silenceSeconds"];
         Check(namedSettings.Select(Field<Control>).All(control => !string.IsNullOrWhiteSpace(control.AccessibleName)), "direct and nested settings inputs expose nonempty accessible field names");
         string[] settingsWithUnits = ["_customFps", "_customBitrate", "_segment", "_retention", "_maxStorage", "_minFree", "_protectMinutes", "_autoStopMinutes", "_systemGain", "_microphoneGain", "_silenceSeconds"];
         Check(settingsWithUnits.Select(Field<NumericUpDown>).All(control => !string.IsNullOrWhiteSpace(control.AccessibleDescription)) && Field<NumericUpDown>("_retention").AccessibleName != Field<NumericUpDown>("_maxStorage").AccessibleName, "numeric fields retain their units and distinct purposes for assistive technology");
@@ -756,6 +763,82 @@ internal static class Program
         Call("ShowPage", 2); controller.ArchiveOverride = Enumerable.Range(0, 750).Select(i => new RecordingInfo($"record-{i:0000}.mkv", DateTime.UtcNow.AddMinutes(-i), i * 1024L, false, false)).ToArray(); Call("RefreshRecordings", true); var target = controller.ArchiveOverride[605]; Call("SelectArchiveRecording", target);
         Check(Field<Label>("_archivePageLabel").Text.StartsWith("Seite 4") && grid.SelectedRows.Count == 1 && ((RecordingInfo)grid.SelectedRows[0].Tag!).Path == target.Path, "time search can reveal and select a match beyond the first archive page");
         Check(Field<Button>("_bookmarksSelected").Enabled, "single archive selection exposes saved moments");
+        using (var qualityController = new PreviewController())
+        using (var qualityForm = new MainForm(qualityController, enableHotkeys: false))
+        {
+            qualityForm.StartPosition = FormStartPosition.Manual; qualityForm.Location = new Point(-20000, -20000);
+            qualityForm.Show(); Application.DoEvents();
+            T QualityField<T>(string name) where T : class => (T)typeof(MainForm).GetField(name, flags)!.GetValue(qualityForm)!;
+            object? QualityCall(string name, params object[] args) => typeof(MainForm).GetMethod(name, flags)!.Invoke(qualityForm, args);
+            AppSettings QualityDraft() => (AppSettings)QualityCall("ReadSettings")!;
+            QualityCall("ShowPage", 1); QualityCall("ShowSettingTab", 1); QualityCall("CompletePageTransition");
+            var qualityMode = QualityField<ComboBox>("_encodingQuality");
+            var automaticBitrate = QualityField<CheckBox>("_autoVideoBitrate");
+            var manualBitrate = QualityField<NumericUpDown>("_customBitrate");
+            var selectedDisplay = QualityField<ComboBox>("_display");
+            var qualityEstimate = QualityField<Label>("_qualityEstimate");
+            Check(qualityController.Settings.Fps == 60 && qualityController.Settings.EncodingQuality == "Quality" && qualityController.Settings.AutoVideoBitrate &&
+                QualityField<ComboBox>("_profile").SelectedIndex == 3 && qualityMode.SelectedIndex == 2 && automaticBitrate.Checked,
+                "a fresh installation opens with the requested very high sixty-FPS quality preset");
+            Check(!manualBitrate.Enabled && qualityEstimate.Text.Contains("2560") && qualityEstimate.Text.Contains("1440"),
+                "adaptive bitrate disables manual editing and explains the selected native capture dimensions");
+            string largerDisplayEstimate = qualityEstimate.Text;
+            selectedDisplay.SelectedIndex = 1;
+            Check(QualityDraft().DisplayId == "second" && qualityEstimate.Text.Contains("1920") && qualityEstimate.Text.Contains("1080") && qualityEstimate.Text != largerDisplayEstimate,
+                "selecting another monitor recalculates its adaptive bitrate and storage estimate immediately");
+            selectedDisplay.SelectedIndex = 0;
+            Check(qualityEstimate.Text == largerDisplayEstimate, "returning to the first monitor restores its original native-resolution estimate");
+            automaticBitrate.Checked = false; manualBitrate.Value = 18432; qualityMode.SelectedIndex = 1;
+            Check(manualBitrate.Enabled && !QualityDraft().AutoVideoBitrate && QualityDraft().VideoBitrateKbps == 18432 && QualityDraft().EncodingQuality == "Balanced" && QualityField<ComboBox>("_profile").SelectedIndex == 4,
+                "manual bitrate and encoder quality remain independent and mark a custom draft");
+            automaticBitrate.Checked = true;
+            Check(!manualBitrate.Enabled && QualityDraft().AutoVideoBitrate && QualityField<Button>("_save").Enabled,
+                "switching back to adaptive bitrate becomes a visible unsaved preference");
+            automaticBitrate.Checked = false;
+            Check(manualBitrate.Value == 18432 && QualityDraft().VideoBitrateKbps == 18432,
+                "temporarily previewing automatic bitrate preserves the user's manual bitrate");
+            var qualitySave = (Task)QualityCall("SaveSettingsAsync")!; PumpMessages(30);
+            Check(qualitySave.IsCompletedSuccessfully && !qualityController.Settings.AutoVideoBitrate && qualityController.Settings.VideoBitrateKbps == 18432 && qualityController.Settings.EncodingQuality == "Balanced",
+                "saving a custom quality draft commits its independent manual and encoder settings");
+            QualityCall("LoadSettings");
+            Check(!automaticBitrate.Checked && manualBitrate.Enabled && manualBitrate.Value == 18432 && qualityMode.SelectedIndex == 1 && QualityField<ComboBox>("_profile").SelectedIndex == 4,
+                "reloading saved manual quality neither enables adaptive bitrate nor relabels it as a preset");
+            QualityField<ComboBox>("_profile").SelectedIndex = 3;
+            Check(automaticBitrate.Checked && qualityMode.SelectedIndex == 2 && QualityDraft().Fps == 60,
+                "the very high quality preset consistently restores adaptive quality mode after a manual setup");
+            qualitySave = (Task)QualityCall("SaveSettingsAsync")!; PumpMessages(30);
+            QualityCall("LoadSettings");
+            Check(qualitySave.IsCompletedSuccessfully && qualityController.Settings.AutoVideoBitrate && qualityController.Settings.Fps == 60 && qualityController.Settings.EncodingQuality == "Quality" && !QualityField<Button>("_save").Enabled,
+                "adaptive sixty-FPS quality survives save and reload without a false dirty state");
+            automaticBitrate.Checked = false; qualityMode.SelectedIndex = 0;
+            QualityField<Button>("_discard").PerformClick();
+            Check(automaticBitrate.Checked && qualityMode.SelectedIndex == 2 && !QualityField<Button>("_save").Enabled,
+                "discarding quality changes restores both adaptive bitrate and encoder quality together");
+            qualityController.Settings.AutoVideoBitrate = false; qualityController.Settings.VideoBitrateKbps = 3000;
+            qualityController.Settings.Fps = 15; qualityController.Settings.EncodingQuality = "Efficiency";
+            QualityCall("LoadSettings");
+            Check(!automaticBitrate.Checked && manualBitrate.Value == 3000 && QualityField<ComboBox>("_profile").SelectedIndex == 4,
+                "legacy manual fifteen-FPS settings stay manual instead of silently becoming the new adaptive preset");
+            qualityController.Settings.RecordOnLaunch = true; QualityCall("LoadSettings");
+            QualityField<CheckBox>("_gameDetection").Checked = true;
+            QualityField<TextBox>("_gameNames").Text = "demo-game.exe";
+            Check(!qualityController.Settings.GameDetectionEnabled && qualityController.Settings.RecordOnLaunch && QualityField<Button>("_saveGames").Enabled,
+                "a game-detection draft remains unapplied until its dedicated save action");
+            var gameModeSave = (Task)QualityCall("SaveGamesAsync")!; PumpMessages(30);
+            Check(gameModeSave.IsCompletedSuccessfully && qualityController.Settings.GameDetectionEnabled && !qualityController.Settings.RecordOnLaunch,
+                "saving game mode also removes an older unrestricted launch-recording preference");
+            QualityCall("RefreshDashboard");
+            Check(!QualityField<CheckBox>("_recordOnLaunch").Checked && !QualityField<CheckBox>("_recordOnLaunch").Enabled && !QualityDraft().RecordOnLaunch,
+                "saved game mode visibly disables unrestricted program-launch recording in the general settings");
+            qualityController.GameDetectionMessage = "Demo · Wartet auf ein sichtbares Spielfenster";
+            QualityCall("RefreshDashboard");
+            Check(QualityField<Label>("_gamesLive").Text == qualityController.GameDetectionMessage,
+                "game tools display the controller's actual detection reason without claiming an unverified game");
+            qualityController.GameDetectionMessage = "Demo · Spiel sichtbar: demo-game.exe";
+            QualityCall("RefreshDashboard");
+            Check(QualityField<Label>("_gamesLive").Text == qualityController.GameDetectionMessage,
+                "game detection status updates after the controller reports a visible game");
+        }
         // Navigation and hover remain finite; the separately configured ambient layer has its own bounded timer.
         Call("SetMotionEnabled", false); Call("SetMotionEnabled", true); Call("CompletePageTransition"); Call("ConfigureAmbientBackground", false);
         var pageTimer = Field<System.Windows.Forms.Timer>("_pageMotionTimer");
@@ -1019,6 +1102,16 @@ internal static class Program
             int gdiBefore = GetGuiResources(uiProcess.Handle, 0);
             for (int phase = 0; phase < 16; phase++) PhaseHash(phase * Math.Tau / 16);
             Check(GetGuiResources(uiProcess.Handle, 0) <= gdiBefore + 4, "repeated native background renders do not accumulate GDI drawing handles");
+            SetLogicalClientSize(form, new Size(1180, 780)); PhaseHash(0);
+            SetLogicalClientSize(form, new Size(1024, 720)); PhaseHash(0);
+            gdiBefore = GetGuiResources(uiProcess.Handle, 0);
+            for (int resize = 0; resize < 8; resize++)
+            {
+                SetLogicalClientSize(form, resize % 2 == 0 ? new Size(1180, 780) : new Size(1024, 720));
+                PhaseHash(resize * Math.Tau / 8);
+            }
+            Check(GetGuiResources(uiProcess.Handle, 0) <= gdiBefore + 8,
+                "resizing the cached silver background replaces its drawing resources without accumulating GDI handles");
         }
         controller.Recording = false; Call("RefreshDashboard");
         using (var lifetimeController = new PreviewController())
@@ -1061,6 +1154,7 @@ internal sealed class PreviewController : IAppController
     private readonly List<RecordingProfile> _profiles = [new("default-profile", "Demo · Shooter mit Headset", new AppSettings { DisplayId = "test", AudioDeviceId = "headset" })];
     public bool Recording { get; set; }
     public bool Paused { get; set; }
+    public string GameDetectionMessage { get; set; } = "Demo · Spielerkennung ausgeschaltet";
     public int RecordingScans { get; private set; }
     public bool DelayNextScan { get; set; }
     public bool DelayNextStart { get; set; }
@@ -1077,8 +1171,8 @@ internal sealed class PreviewController : IAppController
     public IReadOnlyList<DisplaySource> Displays { get; } = [new("test", "Bildschirm 1 · 2560 × 1440", 0, 0, 0, 0, 2560, 1440), new("second", "Bildschirm 2 · 1920 × 1080", 0, 1, 2560, 0, 1920, 1080)];
     public IReadOnlyList<AudioSource> Microphones { get; } = [new("mic", "Headset · Mikrofon"), new("usb", "USB · Mikrofon")];
     public IReadOnlyList<AudioSource> AudioDevices { get; } = [new("speakers", "Lautsprecher · Realtek Audio"), new("headset", "Headset · Spielausgabe")];
-    public DashboardStatus Status => new(Recording, StartPending || StopPending, Recording ? "Bildschirm 1 wird im Hintergrund aufgenommen. Du kannst ScreenDash minimieren." : "Bereit für die erste Aufnahme", Encoder, TimeSpan.FromMinutes(17.4), Recording ? 1.7 : 0.2, 83 * 1024L * 1024, 15,
-        new(0, 0, 6L * 1024 * 1024 * 1024, 512L * 1024 * 1024, 185L * 1024 * 1024 * 1024, true, ""), Armed: Recording || Paused || StartPending && !_startCanceled, Paused: Paused, PauseReason: Paused ? "Manuell pausiert" : "", AudioPeak: Recording ? 0.26 : 0, AudioDevice: "Headset · Spielausgabe", Remaining: Recording || Paused ? Remaining : null);
+    public DashboardStatus Status => new(Recording, StartPending || StopPending, Recording ? "Bildschirm 1 wird im Hintergrund aufgenommen. Du kannst ScreenDash minimieren." : "Bereit für die erste Aufnahme", Encoder, TimeSpan.FromMinutes(17.4), Recording ? 1.7 : 0.2, 83 * 1024L * 1024, Recording ? Settings.Fps : 0,
+        new(0, 0, 6L * 1024 * 1024 * 1024, 512L * 1024 * 1024, 185L * 1024 * 1024 * 1024, true, ""), Armed: Recording || Paused || StartPending && !_startCanceled, Paused: Paused, PauseReason: Paused ? "Manuell pausiert" : "", AudioPeak: Recording ? 0.26 : 0, AudioDevice: "Headset · Spielausgabe", Remaining: Recording || Paused ? Remaining : null, GameDetectionMessage: GameDetectionMessage);
     public event Action? Changed;
     public event Action<string>? Notice { add { } remove { } }
     public async Task ToggleRecordingAsync()

@@ -59,6 +59,8 @@ public sealed class ProfileLibrary
         destination.AudioDeviceId = source.AudioDeviceId;
         destination.Fps = source.Fps;
         destination.VideoBitrateKbps = source.VideoBitrateKbps;
+        destination.AutoVideoBitrate = source.AutoVideoBitrate;
+        destination.EncodingQuality = source.EncodingQuality;
         destination.EncoderMode = source.EncoderMode;
         destination.AllowSoftwareEncoding = source.AllowSoftwareEncoding;
         destination.CaptureCursor = source.CaptureCursor;
@@ -78,13 +80,21 @@ public sealed class ProfileLibrary
         {
             using var stream = new FileStream(_filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
             if (stream.Length > MaximumJsonBytes) throw new JsonException("Die Profildatei ist zu groß.");
-            var profiles = JsonSerializer.Deserialize<List<RecordingProfile>>(stream, JsonOptions) ?? throw new JsonException("Die Profildatei ist leer.");
+            using var json = JsonDocument.Parse(stream);
+            if (json.RootElement.ValueKind != JsonValueKind.Array) throw new JsonException("Die Profildatei muss eine Liste enthalten.");
+            var profiles = json.RootElement.Deserialize<List<RecordingProfile>>(JsonOptions) ?? throw new JsonException("Die Profildatei ist leer.");
+            var storedProfiles = json.RootElement.EnumerateArray().ToArray();
             if (profiles.Count > MaximumProfiles) throw new JsonException("Die Profildatei enthält zu viele Profile.");
             var ids = new HashSet<string>(StringComparer.Ordinal);
             var normalized = new List<RecordingProfile>(profiles.Count);
-            foreach (var profile in profiles)
+            for (int index = 0; index < profiles.Count; index++)
             {
+                var profile = profiles[index];
                 if (profile is null || profile.Settings is null) throw new JsonException("Das Aufnahmeprofil ist unvollständig.");
+                if (storedProfiles[index].ValueKind != JsonValueKind.Object) throw new JsonException("Ungültiger Profileintrag.");
+                foreach (var property in storedProfiles[index].EnumerateObject())
+                    if (property.Name.Equals("Settings", StringComparison.OrdinalIgnoreCase))
+                        SettingsStore.ApplyLegacyQualityDefaults(profile.Settings, property.Value);
                 var id = ValidateId(profile.Id);
                 if (!ids.Add(id)) throw new JsonException("Doppelte Profilkennung.");
                 normalized.Add(new(id, ValidateName(profile.Name), SettingsStore.Validate(profile.Settings)));

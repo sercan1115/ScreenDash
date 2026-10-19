@@ -13,7 +13,7 @@ public sealed partial class MainForm
     private readonly NumericUpDown _systemGain = Number(0, 200), _microphoneGain = Number(0, 200), _silenceSeconds = Number(10, 600);
     private readonly TextBox _profileName = Entry(), _gameNames = Entry(), _updateDirectory = Entry();
     private readonly Button _openUpdateFolder = ActionButton("Ordner öffnen"), _testMicrophone = ActionButton("Mikrofon testen");
-    private readonly Button _saveProfile = ActionButton("Profil speichern", true), _applyProfile = ActionButton("Anwenden"), _deleteProfile = ActionButton("Löschen"), _pickGames = ActionButton("Laufende Spiele …"), _saveGames = ActionButton("Erkennung speichern", true), _checkUpdate = ActionButton("Update prüfen"), _downloadUpdate = ActionButton("Update vorbereiten", true), _launchUpdate = ActionButton("Jetzt wechseln …"), _cancelUpdate = ActionButton("Abbrechen");
+    private readonly Button _saveProfile = ActionButton("Profil speichern", true), _applyProfile = ActionButton("Anwenden"), _deleteProfile = ActionButton("Löschen"), _pickGames = ActionButton("Fenster auswählen …"), _saveGames = ActionButton("Erkennung speichern", true), _checkUpdate = ActionButton("Update prüfen"), _downloadUpdate = ActionButton("Update vorbereiten", true), _launchUpdate = ActionButton("Jetzt wechseln …"), _cancelUpdate = ActionButton("Abbrechen");
     private readonly Label _profilesHint = TextLabel("Bildschirm, Ton und Qualität als eigenes Profil speichern.", 9, Muted), _gamesHint = TextLabel("Spielnamen mit .exe eintragen, durch Komma trennen. Erkennung ist standardmäßig aus.", 9, Muted), _updateHint = TextLabel("Updates werden erst auf deinen Klick bei GitHub geprüft.", 9, Muted);
     private readonly ToolStatusPill _profileStatus = new("DEIN SETUP", Violet), _gameStatus = new("AUSGESCHALTET", Muted), _updateStatus = new("MANUELL", Cyan);
     private UpdateInfo? _availableUpdate;
@@ -22,6 +22,8 @@ public sealed partial class MainForm
     private Task? _activeUpdateTask;
     private bool _checkingUpdate, _profilesLoading, _gamesBusy, _hotkeyBookmark;
     private string _gamesBaseline = "";
+    private readonly Label _gamesLive = TextLabel("Spielerkennung ist ausgeschaltet.", 9, Muted);
+    private readonly Button _addGameFile = ActionButton("Spiel-EXE wählen …");
 
     private void BuildAudioFeatures(TableLayoutPanel fields)
     {
@@ -45,7 +47,7 @@ public sealed partial class MainForm
         var pa = FeatureActions(_saveProfile, _applyProfile, _deleteProfile); AddWide(pf, pa, 58); AddToolNote(pf, _profilesHint, 66); AddHelp(pf, "Stelle deine Quellen und Qualität unter Einstellungen ein.\nDas neue Profil speichert diesen Entwurf."); _toolTabs[0] = profiles; _toolFields.Controls.Add(profiles);
         _saveProfile.Click += async (_, _) => await SaveProfileAsync(); _applyProfile.Click += async (_, _) => await ApplySavedProfileAsync(); _deleteProfile.Click += async (_, _) => await DeleteProfileAsync(); _savedProfiles.SelectedIndexChanged += (_, _) => RefreshFeatureActions(); _profileName.TextChanged += (_, _) => RefreshFeatureActions();
         var games = Surface(new Padding(26, 22, 26, 24)); var gf = SettingsGrid(games); AddToolHeading(gf, "Spiel an. Aufnahme bereit.", "Starte deinen Rückblick automatisch mit ausgewählten Spielen.", 1, _gameStatus); AddWide(gf, _gameDetection, 48); _gameNames.PlaceholderText = "game.exe, anderes-spiel.exe"; AddField(gf, "Spiele / Programme", _gameNames, 50);
-        var ga = FeatureActions(_pickGames, _saveGames); AddWide(gf, ga, 58); AddToolNote(gf, _gamesHint, 72); AddHelp(gf, "Die Erkennung nutzt deine gespeicherten Aufnahme-Einstellungen.\nNach manuellem Stopp müssen alle gewählten Spiele zuerst beendet werden."); _toolTabs[1] = games; _toolFields.Controls.Add(games); _pickGames.Click += async (_, _) => await PickGamesAsync(); _saveGames.Click += async (_, _) => await SaveGamesAsync(); _gameNames.TextChanged += (_, _) => RefreshFeatureActions(); _gameDetection.CheckedChanged += (_, _) => RefreshFeatureActions();
+        var ga = FeatureActions(_pickGames, _addGameFile, _saveGames); AddWide(gf, ga, 58); AddToolNote(gf, _gamesHint, 72); _gamesLive.AccessibleName = "Status der Spielerkennung"; AddWide(gf, _gamesLive, 68); AddHelp(gf, "Start nur mit sichtbarem Spielfenster im Vordergrund (Prüfung etwa alle 6 Sekunden).\nLauncher starten keine Aufnahme. Alt + Tab unterbricht eine laufende Spielaufnahme nicht."); _toolTabs[1] = games; _toolFields.Controls.Add(games); _pickGames.Click += async (_, _) => await PickGamesAsync(); _addGameFile.Click += (_, _) => AddGameExecutable(); _saveGames.Click += async (_, _) => await SaveGamesAsync(); _gameNames.TextChanged += (_, _) => RefreshFeatureActions(); _gameDetection.CheckedChanged += (_, _) => RefreshFeatureActions();
         var updates = Surface(new Padding(26, 22, 26, 24)); var uf = SettingsGrid(updates); AddToolHeading(uf, "Immer auf deinem Stand", "Die nächste ScreenDash-Version ist nur wenige Klicks entfernt.", 2, _updateStatus); AddToolNote(uf, _updateHint, 88); var ua = FeatureActions(_checkUpdate, _downloadUpdate, _launchUpdate, _cancelUpdate); AddWide(uf, ua, 58);
         _updateDirectory.ReadOnly = true; _updateDirectory.Text = "Nach dem Vorbereiten verfügbar"; var location = Grid(2, 1); location.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); location.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130)); location.Controls.Add(_updateDirectory, 0, 0); _openUpdateFolder.Dock = DockStyle.Fill; _openUpdateFolder.Font = new Font("Segoe UI", 9); _openUpdateFolder.Margin = new Padding(8, 0, 0, 0); location.Controls.Add(_openUpdateFolder, 1, 0); AddField(uf, "Neuer Versionsordner", location, 44); _openUpdateFolder.Click += (_, _) => { if (_preparedUpdate is { } update) RunSync(() => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Path.GetDirectoryName(update.ExecutablePath) ?? update.Directory) { UseShellExecute = true })); };
         var updateHelp = TextLabel("„Jetzt wechseln“ speichert die Aufnahme und startet die neue Version automatisch.\nDie eigene ScreenDash-Desktopverknüpfung folgt beim neuen Programmstart.\nAndere manuell erstellte Verknüpfungen bei Bedarf auf den neuen Ordner ändern.", 9, Muted); updateHelp.TextAlign = ContentAlignment.TopLeft; updateHelp.Padding = new Padding(0, 17, 0, 0); AddWide(uf, updateHelp, 98); _toolTabs[2] = updates; _toolFields.Controls.Add(updates);
@@ -132,11 +134,11 @@ public sealed partial class MainForm
         _trayBookmark.Enabled = _bookmark.Enabled;
         _bookmarksSelected.Enabled = !_uiBusy && !_exporting && !_exitInProgress && SelectedRecording() is not null; _findTime.Enabled = !_uiBusy && !_exporting && !_exitInProgress;
         _saveProfile.Enabled = idle && !_profilesLoading && _profileName.Text.Trim().Length > 0; _applyProfile.Enabled = idle && !_profilesLoading && _savedProfiles.SelectedItem is RecordingProfile; _deleteProfile.Enabled = idle && !_profilesLoading && _savedProfiles.SelectedItem is RecordingProfile;
-        _gameDetection.Enabled = _gameNames.Enabled = idle && !_gamesBusy; _pickGames.Enabled = idle && !_gamesBusy; _saveGames.Enabled = idle && !_gamesBusy && GamesFingerprint() != _gamesBaseline;
+        _gameDetection.Enabled = _gameNames.Enabled = idle && !_gamesBusy; _pickGames.Enabled = _addGameFile.Enabled = idle && !_gamesBusy; _saveGames.Enabled = idle && !_gamesBusy && GamesFingerprint() != _gamesBaseline;
         _checkUpdate.Enabled = !_checkingUpdate && _activeUpdateTask is null && !_exitInProgress; _downloadUpdate.Enabled = !_checkingUpdate && _activeUpdateTask is null && _availableUpdate is { IsNewer: true } && _preparedUpdate is null && !_exitInProgress; _launchUpdate.Enabled = _openUpdateFolder.Enabled = _preparedUpdate is not null && !_checkingUpdate && _activeUpdateTask is null && !_exitInProgress; _cancelUpdate.Visible = _activeUpdateTask is not null;
         _profilesHint.Text = idle ? "Profile ändern deine Aufnahmequellen und Qualität. Ordner und Speicherregeln bleiben erhalten." : "Stoppe die Aufnahme, um ein Profil zu speichern oder anzuwenden.";
         _profileStatus.Text = _profilesLoading ? "WIRD GELADEN" : _savedProfiles.Items.Count == 1 ? "1 PROFIL" : $"{_savedProfiles.Items.Count} PROFILE";
-        bool configuredGames = _controller.Settings.GameDetectionEnabled; _gameStatus.Text = configuredGames ? "AKTIVIERT" : "AUSGESCHALTET"; _gameStatus.ForeColor = configuredGames ? Cyan : Muted;
+        bool configuredGames = _controller.Settings.GameDetectionEnabled; _recordOnLaunch.Enabled = !configuredGames; _gamesLive.Text = configuredGames ? string.IsNullOrWhiteSpace(status.GameDetectionMessage) ? "Warte auf ein ausgewähltes Spielfenster im Vordergrund." : status.GameDetectionMessage : "Spielerkennung ist ausgeschaltet. Es wird kein Spiel automatisch gestartet oder aufgenommen."; _gameStatus.Text = configuredGames ? "AKTIVIERT" : "AUSGESCHALTET"; _gameStatus.ForeColor = configuredGames ? Cyan : Muted;
         _updateStatus.Text = _activeUpdateTask is not null ? "DOWNLOAD" : _checkingUpdate ? "WIRD GEPRÜFT" : _preparedUpdate is not null ? "BEREIT" : _availableUpdate is { IsNewer: true } ? "VERFÜGBAR" : "MANUELL";
     }
     private string GamesFingerprint() => _gameDetection.Checked + "\n" + _gameNames.Text.Trim();
@@ -181,10 +183,21 @@ public sealed partial class MainForm
         catch (OperationCanceledException) { } catch (Exception ex) { if (!IsDisposed) ShowError(ex); } finally { _gamesBusy = false; RefreshFeatureActions(); }
     }
     private static string[] ParseGameNames(string text) => text.Split([',', ';', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    private void AddGameExecutable()
+    {
+        using var dialog = new OpenFileDialog { Title = "Die EXE des Spiels auswählen", Filter = "Spielprogramme (*.exe)|*.exe", CheckFileExists = true, Multiselect = false };
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+        RunSync(() =>
+        {
+            var name = GameDetection.NormalizeExecutableName(Path.GetFileName(dialog.FileName));
+            if (GameDetection.IsExcludedExecutable(name)) throw new InvalidOperationException("Das ist ein Launcher oder Hilfsprogramm. Wähle die eigentliche EXE des Spiels.");
+            _gameNames.Text = string.Join(", ", ParseGameNames(_gameNames.Text).Append(name).Distinct(StringComparer.OrdinalIgnoreCase));
+        });
+    }
     private async Task SaveGamesAsync()
     {
         if (!_saveGames.Enabled) return;
-        await RunActionAsync(async () => { var draft = _controller.Settings.Clone(); draft.GameExecutables = ParseGameNames(_gameNames.Text).ToList(); draft.GameDetectionEnabled = _gameDetection.Checked; await _controller.SaveSettingsAsync(draft); _gamesBaseline = GamesFingerprint(); _footer.Text = draft.GameDetectionEnabled ? "Spielerkennung aktiviert. Die Aufnahme startet, sobald ein ausgewähltes Spiel läuft." : "Spielerkennung gespeichert und ausgeschaltet."; });
+        await RunActionAsync(async () => { var draft = _controller.Settings.Clone(); draft.GameExecutables = ParseGameNames(_gameNames.Text).ToList(); draft.GameDetectionEnabled = _gameDetection.Checked; if (draft.GameDetectionEnabled) draft.RecordOnLaunch = false; await _controller.SaveSettingsAsync(draft); _gamesBaseline = GamesFingerprint(); if (draft.GameDetectionEnabled) _recordOnLaunch.Checked = false; _footer.Text = draft.GameDetectionEnabled ? "Spielerkennung aktiviert: Start nur im Spielfenster. Aufnahme beim Programmstart ist ausgeschaltet." : "Spielerkennung gespeichert und ausgeschaltet."; });
     }
 
     private async Task CheckUpdateAsync()

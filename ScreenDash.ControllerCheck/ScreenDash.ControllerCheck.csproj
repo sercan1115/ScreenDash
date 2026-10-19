@@ -3,6 +3,7 @@
   <ItemGroup>
     <PackageReference Include="NAudio" Version="2.2.1" />
     <Compile Include="../ScreenDash/Contracts.cs" Link="Contracts.cs" />
+    <Compile Include="../ScreenDash/RecordingQuality.cs" Link="RecordingQuality.cs" />
     <Compile Include="../ScreenDash/AppController.cs" Link="AppController.cs" />
     <Compile Include="../ScreenDash/AppController.Features.cs" Link="AppController.Features.cs" />
     <Compile Include="../ScreenDash/GameDetection.cs" Link="GameDetection.cs" />

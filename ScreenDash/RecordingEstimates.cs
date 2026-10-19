@@ -5,11 +5,12 @@ public sealed record RecordingEstimate(double BytesPerHour, double GiBPerHour, d
 /// <summary>Planning estimates from nominal bitrate, including 3% container margin; not measured sizes.</summary>
 public static class RecordingEstimates
 {
-    public static RecordingEstimate Calculate(AppSettings settings, long protectedBytes = 0, long? freeBytes = null)
+    public static RecordingEstimate Calculate(AppSettings settings, long protectedBytes = 0, long? freeBytes = null, DisplaySource? display = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
         const double gib = 1024d * 1024 * 1024;
-        double rate = (Math.Clamp(settings.VideoBitrateKbps, 500, 50_000) + (settings.AudioEnabled || settings.MicrophoneEnabled ? 128 : 0)) * 1000d / 8 * 3600 * 1.03;
+        int bitrate = display is null ? Math.Clamp(settings.VideoBitrateKbps, 500, RecordingQuality.MaximumBitrateKbps) : RecordingQuality.ResolveBitrateKbps(settings, display);
+        double rate = (bitrate + (settings.AudioEnabled || settings.MicrophoneEnabled ? 128 : 0)) * 1000d / 8 * 3600 * 1.03;
         double pinned = Math.Max(0, protectedBytes);
         double quota = Math.Clamp(settings.MaxStorageGb, 1, 4096) * gib;
         double hoursAtLimit = Math.Max(0, quota - pinned) / rate;

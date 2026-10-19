@@ -46,7 +46,8 @@ public sealed partial class AppController : IAppController
             return new(_recordStatus.Recording, _busy || (_initializing && !armed), _message, _recordStatus.Encoder, elapsed,
                 _cpu, _memory, _recordStatus.Fps, _storage, armed, _session.Paused, _session.PauseReason, _recordStatus.AudioPeak, _recordStatus.AudioDevice,
                 RecordingTimer.Remaining(_settings.AutoStopMinutes, elapsed, armed), _recordStatus.MicrophonePeak, _recordStatus.MicrophoneDevice,
-                string.IsNullOrEmpty(_recordStatus.AudioWarning) ? _silenceWarning : _recordStatus.AudioWarning);
+                string.IsNullOrEmpty(_recordStatus.AudioWarning) ? _silenceWarning : _recordStatus.AudioWarning,
+                _settings.GameDetectionEnabled ? _gameDetectionMessage : "");
         }
     }
     public event Action? Changed;
@@ -160,7 +161,7 @@ public sealed partial class AppController : IAppController
             var display = string.IsNullOrEmpty(_settings.DisplayId) ? _displays.FirstOrDefault() : _displays.FirstOrDefault(d => d.Id == _settings.DisplayId);
             if (display is null) throw new InvalidOperationException("Der gewählte Bildschirm ist nicht verbunden. Wähle in den Einstellungen einen verfügbaren Bildschirm.");
             await _storageOperations.WaitAsync(startup.Token);
-            try { SetStorage(await Task.Run(() => _store.Cleanup(_settings), startup.Token)); }
+            try { SetStorage(await Task.Run(() => _store.Cleanup(_settings, videoPeakBitrateKbps: StorageVideoPeak(_settings)), startup.Token)); }
             finally { _storageOperations.Release(); }
             startup.Token.ThrowIfCancellationRequested();
             if (!_session.CanCapture) throw new OperationCanceledException("Aufnahmestart unterbrochen.", startup.Token);
@@ -231,7 +232,7 @@ public sealed partial class AppController : IAppController
             _settings = validated;
             if (gamesChanged) lock (_gameGate) { _gameDetection.Reset(); _gameRecordingOwned = false; _gameExitCounter = null; }
             _session.SetPrivacy(_locked, _suspended, validated.PauseOnLock);
-            SetStorage(await Task.Run(() => _store.Cleanup(validated)));
+            SetStorage(await Task.Run(() => _store.Cleanup(validated, videoPeakBitrateKbps: StorageVideoPeak(validated))));
             _message = "Einstellungen gespeichert";
             }
             finally { _storageOperations.Release(); }
@@ -260,7 +261,7 @@ public sealed partial class AppController : IAppController
         try
         {
             int count = await Task.Run(() => _store.ProtectRecent(_settings.ProtectMinutes, _sessionPrefix));
-            SetStorage(await Task.Run(() => _store.Cleanup(_settings, _sessionPrefix)));
+            SetStorage(await Task.Run(() => _store.Cleanup(_settings, _sessionPrefix, videoPeakBitrateKbps: StorageVideoPeak(_settings))));
             _message = count > 0 ? $"{count} Videodatei(en) vor automatischem Löschen geschützt" : "Keine Aufnahmen im gewählten Zeitraum vorhanden";
             ShowNotice(_message);
         }
@@ -283,7 +284,7 @@ public sealed partial class AppController : IAppController
         try
         {
             await Task.Run(() => { foreach (var path in paths.Distinct(StringComparer.OrdinalIgnoreCase)) _store.SetProtected(path, protect); });
-            SetStorage(await Task.Run(() => _store.Cleanup(_settings, _sessionPrefix)));
+            SetStorage(await Task.Run(() => _store.Cleanup(_settings, _sessionPrefix, videoPeakBitrateKbps: StorageVideoPeak(_settings))));
         }
         finally { _gate.Release(); Publish(); }
     }
@@ -299,7 +300,7 @@ public sealed partial class AppController : IAppController
         try
         {
             int count = await Task.Run(() => _store.Delete(paths, allowProtected, _sessionPrefix));
-            SetStorage(await Task.Run(() => _store.Cleanup(_settings, _sessionPrefix)));
+            SetStorage(await Task.Run(() => _store.Cleanup(_settings, _sessionPrefix, videoPeakBitrateKbps: StorageVideoPeak(_settings))));
             _message = $"{count} Aufnahme(n) gelöscht";
             return count;
         }
@@ -522,7 +523,7 @@ public sealed partial class AppController : IAppController
                 // Serialize policy changes with destructive cleanup, without holding the capture gate.
                 store = _store; var settings = _settings.Clone(); string? prefix = _sessionPrefix;
                 revision = Interlocked.Read(ref _storageRevision); generation = _session.Generation;
-                result = await Task.Run(() => store.Cleanup(settings, prefix), _lifetime.Token);
+                result = await Task.Run(() => store.Cleanup(settings, prefix, videoPeakBitrateKbps: StorageVideoPeak(settings)), _lifetime.Token);
             }
             finally { _storageOperations.Release(); }
             await _gate.WaitAsync(_lifetime.Token);
@@ -546,6 +547,15 @@ public sealed partial class AppController : IAppController
     }
     [MemberNotNull(nameof(_storage))]
     private void SetStorage(CleanupResult result) { _storage = result; Interlocked.Increment(ref _storageRevision); }
+    private int StorageVideoPeak(AppSettings settings)
+    {
+        var displays = _displays;
+        var display = string.IsNullOrEmpty(settings.DisplayId) ? displays.FirstOrDefault() : displays.FirstOrDefault(item => item.Id == settings.DisplayId);
+        int target = settings.AutoVideoBitrate && display is { Width: > 0, Height: > 0 }
+            ? RecordingQuality.ResolveBitrateKbps(settings, display)
+            : settings.AutoVideoBitrate ? RecordingQuality.MaximumBitrateKbps : settings.VideoBitrateKbps;
+        return RecordingQuality.PeakBitrateKbps(target);
+    }
 
     private void SamplePerformance()
     {

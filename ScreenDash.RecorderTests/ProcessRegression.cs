@@ -24,6 +24,7 @@ internal static class ProcessRegression
         try
         {
             Check(File.Exists(apphost), "Test apphost is available");
+            _checks += QualityChecks.RunArgumentChecks();
             if (File.Exists(fake)) throw new IOException("Process checks require an isolated test output directory without ffmpeg.exe.");
             File.Copy(apphost, fake, false);
             createdFake = true;

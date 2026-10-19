@@ -8,8 +8,10 @@ public sealed class AppSettings
     public int MinFreeSpaceGb { get; set; } = 2;
     public int SegmentMinutes { get; set; } = 5;
     public bool SingleFile { get; set; } = true;
-    public int Fps { get; set; } = 15;
-    public int VideoBitrateKbps { get; set; } = 3000;
+    public int Fps { get; set; } = 60;
+    public int VideoBitrateKbps { get; set; } = 33500;
+    public bool AutoVideoBitrate { get; set; } = true;
+    public string EncodingQuality { get; set; } = "Quality";
     public string EncoderMode { get; set; } = "Auto";
     public bool AllowSoftwareEncoding { get; set; }
     public bool CaptureCursor { get; set; } = true;
@@ -54,7 +56,7 @@ public sealed record RecordingInfo(string Path, DateTime StartedUtc, long Bytes,
 }
 public sealed record CleanupResult(int DeletedCount, long DeletedBytes, long TotalBytes, long ProtectedBytes, long FreeBytes, bool CanRecord, string Message);
 public sealed record RecorderStatus(bool Recording, string Encoder, string Message, double Fps, long Frames, DateTime? StartedUtc, double AudioPeak = 0, string AudioDevice = "", double MicrophonePeak = 0, string MicrophoneDevice = "", string AudioWarning = "", TimeSpan VideoElapsed = default);
-public sealed record DashboardStatus(bool Recording, bool Busy, string Message, string Encoder, TimeSpan Elapsed, double CpuPercent, long MemoryBytes, double Fps, CleanupResult? Storage, bool Armed = false, bool Paused = false, string PauseReason = "", double AudioPeak = 0, string AudioDevice = "", TimeSpan? Remaining = null, double MicrophonePeak = 0, string MicrophoneDevice = "", string AudioWarning = "");
+public sealed record DashboardStatus(bool Recording, bool Busy, string Message, string Encoder, TimeSpan Elapsed, double CpuPercent, long MemoryBytes, double Fps, CleanupResult? Storage, bool Armed = false, bool Paused = false, string PauseReason = "", double AudioPeak = 0, string AudioDevice = "", TimeSpan? Remaining = null, double MicrophonePeak = 0, string MicrophoneDevice = "", string AudioWarning = "", string GameDetectionMessage = "");
 public sealed record MediaDetails(TimeSpan Duration, int Width, int Height, bool HasAudio);
 public sealed record ClipRange(TimeSpan Start, TimeSpan Duration);
 public sealed record RecordingBookmark(string Id, TimeSpan Offset, DateTime CreatedUtc, string Label);

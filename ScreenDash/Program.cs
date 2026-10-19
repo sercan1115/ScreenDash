@@ -33,7 +33,7 @@ internal static class Program
             catch (Exception ex) { AppLog.Write("Desktop-Verknüpfung konnte nicht erstellt werden: " + ex.Message); }
             form.Shown += async (_, _) =>
             {
-                if (controller.Settings.RecordOnLaunch)
+                if (controller.Settings.RecordOnLaunch && !controller.Settings.GameDetectionEnabled)
                 {
                     try { await controller.ToggleRecordingAsync(); }
                     catch (Exception ex) { Report(ex); }

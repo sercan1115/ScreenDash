@@ -20,7 +20,9 @@ public static class SettingsStore
             {
                 var info = new FileInfo(filePath);
                 if (info.Length > 1024 * 1024) throw new JsonException("Die Einstellungsdatei ist zu groß.");
-                var settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(filePath, Encoding.UTF8), JsonOptions);
+                using var json = JsonDocument.Parse(File.ReadAllText(filePath, Encoding.UTF8));
+                var settings = json.RootElement.Deserialize<AppSettings>(JsonOptions);
+                if (settings is not null) ApplyLegacyQualityDefaults(settings, json.RootElement);
                 return Validate(settings ?? throw new JsonException("Die Einstellungsdatei ist leer."));
             }
             catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
@@ -90,7 +92,8 @@ public static class SettingsStore
         value.MinFreeSpaceGb = Math.Clamp(value.MinFreeSpaceGb, 1, 128);
         value.SegmentMinutes = Math.Clamp(value.SegmentMinutes, 1, 60);
         value.Fps = Math.Clamp(value.Fps, 5, 60);
-        value.VideoBitrateKbps = Math.Clamp(value.VideoBitrateKbps, 500, 50_000);
+        value.VideoBitrateKbps = Math.Clamp(value.VideoBitrateKbps, 500, RecordingQuality.MaximumBitrateKbps);
+        value.EncodingQuality = RecordingQuality.NormalizeQuality(value.EncodingQuality);
         value.ProtectMinutes = Math.Clamp(value.ProtectMinutes, 1, 180);
         value.AutoStopMinutes = Math.Clamp(value.AutoStopMinutes, 0, 1440);
         value.MicrophoneDeviceId ??= "";
@@ -98,11 +101,21 @@ public static class SettingsStore
         value.SystemGainPercent = Math.Clamp(value.SystemGainPercent, 0, 200);
         value.SilenceWarningSeconds = Math.Clamp(value.SilenceWarningSeconds, 10, 600);
         value.GameExecutables = GameDetection.NormalizeNames(value.GameExecutables ?? []);
+        // Game-only automation must never be bypassed by an older record-on-launch preference.
+        if (value.GameDetectionEnabled) value.RecordOnLaunch = false;
         value.EncoderMode = value.EncoderMode?.Trim() ?? "Auto";
         if (value.EncoderMode is not ("Auto" or "NVIDIA" or "AMD" or "Intel" or "Software"))
             throw new ArgumentException("Bitte einen gültigen Encoder auswählen: Auto, NVIDIA, AMD, Intel oder Software.", nameof(settings));
         value.AudioDeviceId ??= "";
         value.DisplayId ??= "";
         return value;
+    }
+
+    internal static void ApplyLegacyQualityDefaults(AppSettings settings, JsonElement stored)
+    {
+        // Existing explicit bitrate choices keep their meaning; the new automatic mode is opt-in on migration.
+        if (stored.ValueKind == JsonValueKind.Object && !stored.EnumerateObject().Any(property =>
+            property.Name.Equals(nameof(AppSettings.AutoVideoBitrate), StringComparison.OrdinalIgnoreCase)))
+            settings.AutoVideoBitrate = false;
     }
 }

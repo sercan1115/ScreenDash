@@ -71,7 +71,7 @@ public sealed partial class RecordingStore
         finally { Monitor.Exit(_gate); }
     }
 
-    public CleanupResult Cleanup(AppSettings settings, string? activeSessionPrefix = null, DateTime? nowUtc = null)
+    public CleanupResult Cleanup(AppSettings settings, string? activeSessionPrefix = null, DateTime? nowUtc = null, int? videoPeakBitrateKbps = null)
     {
         var validated = SettingsStore.Validate(settings);
         lock (_gate)
@@ -91,8 +91,10 @@ public sealed partial class RecordingStore
                 var reserve = validated.MinFreeSpaceGb * 1024L * 1024 * 1024;
                 // Cover the controller's 10-second check interval plus bitrate/muxing variance.
                 // This is an estimate: encoder spikes still need the periodic stop check.
+                int peak = videoPeakBitrateKbps.HasValue ? Math.Clamp(videoPeakBitrateKbps.Value, 500, RecordingQuality.MaximumBitrateKbps)
+                    : validated.AutoVideoBitrate ? RecordingQuality.MaximumBitrateKbps : RecordingQuality.PeakBitrateKbps(validated.VideoBitrateKbps);
                 var headroom = Math.Max(8L * 1024 * 1024,
-                    (long)Math.Ceiling((validated.VideoBitrateKbps + (validated.AudioEnabled || validated.MicrophoneEnabled ? 128 : 0)) * 1000d / 8 * 15 * 1.25));
+                    (long)Math.Ceiling((peak + (validated.AudioEnabled || validated.MicrophoneEnabled ? 128 : 0)) * 1000d / 8 * 15 * 1.25));
 
                 foreach (var entry in scan.Entries.OrderBy(e => e.CompletedUtc).ThenBy(e => e.Path, StringComparer.Ordinal))
                 {

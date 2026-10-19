@@ -8,6 +8,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../ScreenDash/Contracts.cs" Link="Contracts.cs" />
+    <Compile Include="../ScreenDash/RecordingQuality.cs" Link="RecordingQuality.cs" />
     <Compile Include="../ScreenDash/RecordingSessionState.cs" Link="RecordingSessionState.cs" />
     <Compile Include="../ScreenDash/RecordingEstimates.cs" Link="RecordingEstimates.cs" />
     <Compile Include="../ScreenDash/RecordingClock.cs" Link="RecordingClock.cs" />
